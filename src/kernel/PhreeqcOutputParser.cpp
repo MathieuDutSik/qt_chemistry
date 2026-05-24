@@ -41,6 +41,11 @@ bool is_section(const std::string& line, const std::string& title) {
 
 }
 
+std::string elementRoot(const std::string& name) {
+  const auto open = name.find('(');
+  return open == std::string::npos ? name : name.substr(0, open);
+}
+
 ParsedOutput parsePhreeqcOutput(const std::string& raw) {
   ParsedOutput out;
   std::istringstream is(raw);
@@ -51,20 +56,17 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
   Section sec = NONE;
   std::string current_element;
 
-  std::vector<ElementTotalRow> cur_totals;
-  std::map<std::string, std::string> cur_desc;
-  std::vector<SpeciesRow> cur_species;
+  Frame cur_frame;
+  bool frame_has_data = false;
   std::vector<SaturationRow> cur_si;
   std::vector<PhaseAssemblageRow> cur_assemblage;
 
-  auto flush_composition = [&]() {
-    if (!cur_totals.empty()) { out.totals = cur_totals; cur_totals.clear(); }
-  };
-  auto flush_description = [&]() {
-    if (!cur_desc.empty()) { out.description = cur_desc; cur_desc.clear(); }
-  };
-  auto flush_species = [&]() {
-    if (!cur_species.empty()) { out.species = cur_species; cur_species.clear(); }
+  auto push_frame = [&]() {
+    if (frame_has_data) {
+      out.frames.push_back(std::move(cur_frame));
+      cur_frame = Frame{};
+      frame_has_data = false;
+    }
   };
   auto flush_si = [&]() {
     if (!cur_si.empty()) { out.saturation = cur_si; cur_si.clear(); }
@@ -80,21 +82,22 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
     const std::string& ln = lines[i];
 
     if (is_section(ln, "Solution composition")) {
-      flush_composition(); flush_description(); flush_species();
-      flush_si(); flush_assemblage();
+      push_frame();
+      flush_si();
+      flush_assemblage();
       sec = COMPOSITION; current_element.clear(); continue;
     }
     if (is_section(ln, "Description of solution")) {
-      flush_composition(); sec = DESCRIPTION; continue;
+      sec = DESCRIPTION; continue;
     }
     if (is_section(ln, "Distribution of species")) {
-      flush_description(); sec = SPECIES; current_element.clear(); continue;
+      sec = SPECIES; current_element.clear(); continue;
     }
     if (is_section(ln, "Saturation indices")) {
-      flush_species(); sec = SI; continue;
+      sec = SI; continue;
     }
     if (is_section(ln, "Phase assemblage")) {
-      flush_species(); sec = ASSEMBLAGE; continue;
+      sec = ASSEMBLAGE; continue;
     }
     if (starts_with(trim(ln), "Beginning of batch-reaction")) {
       out.has_reaction_step = true;
@@ -113,7 +116,8 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
           r.element = t[0];
           r.molality = to_double_or(t[1]);
           r.moles = to_double_or(t[2]);
-          cur_totals.push_back(r);
+          cur_frame.totals.push_back(r);
+          frame_has_data = true;
         }
         break;
       }
@@ -122,7 +126,10 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
         if (eq != std::string::npos) {
           std::string key = trim(ln.substr(0, eq));
           std::string val = trim(ln.substr(eq + 1));
-          if (!key.empty()) cur_desc[key] = val;
+          if (!key.empty()) {
+            cur_frame.description[key] = val;
+            frame_has_data = true;
+          }
         }
         break;
       }
@@ -152,7 +159,8 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
             r.mole_v = to_double_or(toks[6]);
             r.has_mole_v = true;
           }
-          cur_species.push_back(r);
+          cur_frame.species.push_back(r);
+          frame_has_data = true;
         }
         break;
       }
@@ -193,8 +201,9 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
       case NONE: break;
     }
   }
-  flush_composition(); flush_description(); flush_species();
-  flush_si(); flush_assemblage();
+  push_frame();
+  flush_si();
+  flush_assemblage();
   return out;
 }
 

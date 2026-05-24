@@ -42,15 +42,22 @@ struct ElementTotalRow {
   double moles = 0.0;
 };
 
-struct ParsedOutput {
-  std::map<std::string, std::string> description;
+struct Frame {
   std::vector<ElementTotalRow> totals;
+  std::map<std::string, std::string> description;
   std::vector<SpeciesRow> species;
+};
+
+struct ParsedOutput {
+  std::vector<Frame> frames;
   std::vector<SaturationRow> saturation;
   std::vector<PhaseAssemblageRow> assemblage;
   bool has_reaction_step = false;
 };
 
 ParsedOutput parsePhreeqcOutput(const std::string& raw);
+
+// "C(4)" -> "C", "S(-2)" -> "S", "Ca" -> "Ca".
+std::string elementRoot(const std::string& name);
 
 }

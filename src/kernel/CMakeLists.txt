@@ -4,7 +4,9 @@ add_library(qtchem_kernel STATIC
   PhreeqcSession.h
   PhreeqcSession.cpp
   PhreeqcOutputParser.h
-  PhreeqcOutputParser.cpp)
+  PhreeqcOutputParser.cpp
+  DatabaseInfo.h
+  DatabaseInfo.cpp)
 
 target_include_directories(qtchem_kernel PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/..)

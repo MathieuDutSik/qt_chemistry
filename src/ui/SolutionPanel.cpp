@@ -1,5 +1,7 @@
 #include "ui/SolutionPanel.h"
 
+#include "kernel/DatabaseInfo.h"
+
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -8,11 +10,19 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QStringList>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
 namespace qtchem {
+
+namespace {
+constexpr int kColElement = 0;
+constexpr int kColMaster  = 1;
+constexpr int kColTotal   = 2;
+constexpr int kColUnits   = 3;
+}
 
 SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   auto* root = new QVBoxLayout(this);
@@ -48,13 +58,25 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   ph_extra->addWidget(ph_phase_);
   ph_extra->addWidget(ph_si_);
   state->addRow(QString(), ph_extra);
-
   root->addLayout(state);
 
-  table_ = new QTableWidget(0, 3);
-  table_->setHorizontalHeaderLabels({tr("Element"), tr("Total"), tr("Units")});
-  table_->horizontalHeader()->setStretchLastSection(true);
-  table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+  db_hint_ = new QLabel(tr(
+      "Enter <b>elements</b>, not species. Notation: <code>N</code> = total N, "
+      "<code>N(5)</code> = nitrate, <code>C(4)</code> = inorganic C, "
+      "<code>S(6)</code> = sulfate. Master species column shows the "
+      "charged form. Typing a species (e.g. <code>NO3-</code>) is "
+      "auto-translated when possible."));
+  db_hint_->setWordWrap(true);
+  db_hint_->setStyleSheet("color: #555; font-size: 11px;");
+  root->addWidget(db_hint_);
+
+  table_ = new QTableWidget(0, 4);
+  table_->setHorizontalHeaderLabels(
+      {tr("Element"), tr("Master species"), tr("Total"), tr("Units")});
+  auto* hh = table_->horizontalHeader();
+  hh->setStretchLastSection(true);
+  hh->setSectionResizeMode(kColElement, QHeaderView::ResizeToContents);
+  hh->setSectionResizeMode(kColMaster,  QHeaderView::ResizeToContents);
   table_->verticalHeader()->setVisible(false);
   root->addWidget(table_, 1);
 
@@ -74,24 +96,75 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   connect(sample, &QPushButton::clicked, this, &SolutionPanel::loadSampleSeawater);
   connect(clear, &QPushButton::clicked, this, &SolutionPanel::loadEmpty);
   connect(run, &QPushButton::clicked, this, &SolutionPanel::runRequested);
+  connect(table_, &QTableWidget::cellChanged,
+          this, &SolutionPanel::onCellChanged);
 
   loadSampleSeawater();
 }
 
+SolutionPanel::~SolutionPanel() = default;
+
+void SolutionPanel::setDatabaseInfo(std::shared_ptr<const DatabaseInfo> info) {
+  db_info_ = std::move(info);
+  refreshAllMasterSpecies();
+}
+
+void SolutionPanel::refreshMasterSpecies(int row) {
+  if (row < 0 || row >= table_->rowCount()) return;
+  auto* el = table_->item(row, kColElement);
+  const QString name = el ? el->text().trimmed() : QString();
+  QString text;
+  QColor bg;
+  if (!db_info_) {
+    text = QStringLiteral("(load db)");
+  } else if (name.isEmpty()) {
+    text.clear();
+  } else if (auto m = db_info_->findByElement(name.toStdString())) {
+    text = QString::fromStdString(m->species);
+  } else if (auto el2 = db_info_->elementForSpecies(name.toStdString())) {
+    text = tr("→ %1 (auto)").arg(QString::fromStdString(*el2));
+    bg = QColor(255, 240, 200);
+  } else {
+    text = tr("(unknown)");
+    bg = QColor(255, 220, 220);
+  }
+  auto* item = table_->item(row, kColMaster);
+  if (!item) {
+    item = new QTableWidgetItem;
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    table_->setItem(row, kColMaster, item);
+  }
+  item->setText(text);
+  item->setBackground(bg.isValid() ? QBrush(bg) : QBrush());
+}
+
+void SolutionPanel::refreshAllMasterSpecies() {
+  for (int r = 0; r < table_->rowCount(); ++r) refreshMasterSpecies(r);
+}
+
+void SolutionPanel::onCellChanged(int row, int col) {
+  if (col == kColElement) refreshMasterSpecies(row);
+}
+
 void SolutionPanel::setRow(int row, const QString& el, double total,
                            const QString& units) {
-  table_->setItem(row, 0, new QTableWidgetItem(el));
+  QSignalBlocker block(table_);
+  table_->setItem(row, kColElement, new QTableWidgetItem(el));
+  auto* master = new QTableWidgetItem;
+  master->setFlags(master->flags() & ~Qt::ItemIsEditable);
+  table_->setItem(row, kColMaster, master);
   auto* it1 = new QTableWidgetItem(QString::number(total, 'g', 6));
   it1->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  table_->setItem(row, 1, it1);
-  table_->setItem(row, 2, new QTableWidgetItem(units));
+  table_->setItem(row, kColTotal, it1);
+  table_->setItem(row, kColUnits, new QTableWidgetItem(units));
+  refreshMasterSpecies(row);
 }
 
 void SolutionPanel::onAddRow() {
   const int r = table_->rowCount();
   table_->insertRow(r);
   setRow(r, QString(), 0.0, QStringLiteral("mol/kgw"));
-  table_->editItem(table_->item(r, 0));
+  table_->editItem(table_->item(r, kColElement));
 }
 
 void SolutionPanel::onRemoveRow() {
@@ -128,7 +201,7 @@ void SolutionPanel::loadSampleSeawater() {
   }
 }
 
-EquilibriumProblem SolutionPanel::buildProblem() const {
+EquilibriumProblem SolutionPanel::buildProblem(QStringList* warnings) const {
   EquilibriumProblem p;
   p.title = "qt_chemistry run";
   p.temperature_c = temp_->value();
@@ -141,12 +214,31 @@ EquilibriumProblem SolutionPanel::buildProblem() const {
   p.ph.charge_element = charge_el_->text().toStdString();
 
   for (int r = 0; r < table_->rowCount(); ++r) {
-    auto* el = table_->item(r, 0);
-    auto* tt = table_->item(r, 1);
-    auto* un = table_->item(r, 2);
+    auto* el = table_->item(r, kColElement);
+    auto* tt = table_->item(r, kColTotal);
+    auto* un = table_->item(r, kColUnits);
     if (!el || el->text().trimmed().isEmpty()) continue;
     SolutionComponent c;
-    c.element = el->text().trimmed().toStdString();
+    const std::string typed = el->text().trimmed().toStdString();
+    c.element = typed;
+    if (db_info_) {
+      if (!db_info_->findByElement(typed)) {
+        if (auto translated = db_info_->elementForSpecies(typed)) {
+          c.element = *translated;
+          if (warnings) {
+            *warnings << tr("Row %1: '%2' is a species — using element '%3'.")
+                             .arg(r + 1)
+                             .arg(QString::fromStdString(typed))
+                             .arg(QString::fromStdString(*translated));
+          }
+        } else if (warnings) {
+          *warnings << tr("Row %1: '%2' is not a known element or master "
+                          "species in this database.")
+                           .arg(r + 1)
+                           .arg(QString::fromStdString(typed));
+        }
+      }
+    }
     c.total = tt ? tt->text().toDouble() : 0.0;
     c.units = un ? un->text().trimmed().toStdString() : "mol/kgw";
     if (c.units.empty()) c.units = "mol/kgw";

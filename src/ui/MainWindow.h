@@ -11,6 +11,7 @@ class QTableWidget;
 
 namespace qtchem {
 
+class DatabaseInfo;
 class PhreeqcSession;
 class SolutionPanel;
 struct ParsedOutput;
@@ -30,6 +31,7 @@ private:
   void renderResults(const ParsedOutput& po);
 
   std::unique_ptr<PhreeqcSession> session_;
+  std::shared_ptr<DatabaseInfo> db_info_;
   QComboBox* db_combo_ = nullptr;
   QLabel* db_status_ = nullptr;
   SolutionPanel* solution_panel_ = nullptr;
