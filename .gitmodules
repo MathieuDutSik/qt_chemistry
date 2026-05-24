@@ -1,0 +1,4 @@
+[submodule "external/iphreeqc"]
+	path = external/iphreeqc
+	url = https://github.com/usgs-coupled/iphreeqc.git
+	branch = master

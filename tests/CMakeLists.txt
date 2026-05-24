@@ -1,0 +1,5 @@
+add_executable(kernel_smoke_test kernel_smoke_test.cpp)
+target_link_libraries(kernel_smoke_test PRIVATE qtchem_kernel)
+target_compile_definitions(kernel_smoke_test PRIVATE
+  QTCHEM_TEST_DATABASE_DIR="${QTCHEM_IPHREEQC_DATABASE_DIR}")
+add_test(NAME kernel_smoke_test COMMAND kernel_smoke_test)
