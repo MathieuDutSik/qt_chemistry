@@ -6,6 +6,7 @@
 class QComboBox;
 class QPlainTextEdit;
 class QLabel;
+class QPushButton;
 class QTabWidget;
 class QTableWidget;
 
@@ -25,14 +26,18 @@ public:
 private slots:
   void onDatabaseChanged(int index);
   void onRun();
+  void onShowDatabaseInfo();
 
 private:
   void populateDatabaseList();
   void renderResults(const ParsedOutput& po);
+  QString buildDatabaseInfoHtml() const;
 
   std::unique_ptr<PhreeqcSession> session_;
   std::shared_ptr<DatabaseInfo> db_info_;
+  QString current_database_path_;
   QComboBox* db_combo_ = nullptr;
+  QPushButton* info_btn_ = nullptr;
   QLabel* db_status_ = nullptr;
   SolutionPanel* solution_panel_ = nullptr;
   QTabWidget* result_tabs_ = nullptr;

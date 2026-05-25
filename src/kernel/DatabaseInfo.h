@@ -45,6 +45,14 @@ class DatabaseInfo {
   // gfw (C). Returns 0 if unknown.
   double atomicWeight(const std::string& element_or_state) const;
 
+  // Activity coefficient model detected from the loaded database:
+  // "Davies", "Pitzer", "SIT", "LLNL B-dot", possibly with qualifier.
+  const std::string& activityModelName() const { return activity_model_; }
+
+  // Short human-readable description (provenance, intended use). May be
+  // empty if the database file is not in our built-in registry.
+  const std::string& databaseDescription() const { return description_; }
+
   const std::vector<DbReaction>& phases() const { return phases_; }
   const std::vector<DbReaction>& aqueousReactions() const { return aqueous_; }
   std::optional<DbReaction> findPhase(const std::string& name) const;
@@ -58,6 +66,8 @@ class DatabaseInfo {
   std::vector<DbReaction> aqueous_;
   std::map<std::string, size_t> phase_by_name_;
   std::map<std::string, size_t> aqueous_by_species_;
+  std::string activity_model_;
+  std::string description_;
 };
 
 }

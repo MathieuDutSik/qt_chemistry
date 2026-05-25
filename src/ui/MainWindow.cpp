@@ -10,6 +10,8 @@
 #include "ui/SolutionPanel.h"
 
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -21,6 +23,7 @@
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -74,7 +77,11 @@ MainWindow::MainWindow(QWidget* parent)
   db_combo_ = new QComboBox; db_combo_->setMinimumWidth(280);
   top->addWidget(db_combo_);
   db_status_ = new QLabel(tr("(not loaded)"));
-  top->addWidget(db_status_); top->addStretch(1);
+  top->addWidget(db_status_);
+  info_btn_ = new QPushButton(tr("Information…"));
+  info_btn_->setEnabled(false);
+  top->addWidget(info_btn_);
+  top->addStretch(1);
   root->addLayout(top);
 
   auto* split = new QSplitter(Qt::Horizontal);
@@ -134,6 +141,8 @@ MainWindow::MainWindow(QWidget* parent)
   populateDatabaseList();
   connect(db_combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
           this, &MainWindow::onDatabaseChanged);
+  connect(info_btn_, &QPushButton::clicked,
+          this, &MainWindow::onShowDatabaseInfo);
   connect(solution_panel_, &SolutionPanel::runRequested,
           this, &MainWindow::onRun);
 
@@ -165,12 +174,15 @@ void MainWindow::onDatabaseChanged(int index) {
     auto info = std::make_shared<DatabaseInfo>();
     if (info->load(path.toStdString())) {
       db_info_ = info;
+      current_database_path_ = path;
       solution_panel_->setDatabaseInfo(db_info_);
+      info_btn_->setEnabled(true);
     }
   } else {
     db_status_->setText(tr("load failed"));
     output_view_->setPlainText(QString::fromStdString(err));
     statusBar()->showMessage(tr("Database load failed"));
+    info_btn_->setEnabled(false);
   }
 }
 
@@ -374,6 +386,108 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   for (QTableWidget* t : {totals_table_, species_table_, si_table_,
                           assemblage_table_, desc_table_})
     t->resizeColumnsToContents();
+}
+
+void MainWindow::onShowDatabaseInfo() {
+  if (!db_info_) return;
+  QDialog dlg(this);
+  dlg.setWindowTitle(tr("Database information"));
+  dlg.resize(720, 560);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* browser = new QTextBrowser;
+  browser->setOpenExternalLinks(true);
+  browser->setHtml(buildDatabaseInfoHtml());
+  layout->addWidget(browser, 1);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  layout->addWidget(buttons);
+  dlg.exec();
+}
+
+namespace {
+
+QString activityValidityNote(const QString& model) {
+  if (model.contains("Pitzer", Qt::CaseInsensitive))
+    return MainWindow::tr(
+        "Suitable for brines and concentrated solutions, "
+        "typically up to saturation. Coverage is limited to the ion pairs "
+        "for which Pitzer virial coefficients have been parameterised "
+        "(usually the Na–K–Mg–Ca–Cl–SO₄–HCO₃–CO₃–OH–H–H₂O system, "
+        "with database-specific extensions).");
+  if (model.contains("SIT", Qt::CaseInsensitive))
+    return MainWindow::tr(
+        "Specific-ion Interaction Theory. Typical validity up to I ≈ 4 m. "
+        "Common in radioactive-waste compilations (OECD/NEA TDB).");
+  if (model.contains("LLNL", Qt::CaseInsensitive) ||
+      model.contains("B-dot", Qt::CaseInsensitive))
+    return MainWindow::tr(
+        "Extended Debye–Hückel with a B-dot linear correction term "
+        "(Helgeson-Kirkham-Flowers). Suitable for dilute to moderately "
+        "saline waters at variable T and P; typically I ≲ 2–3 m.");
+  if (model.contains("Truesdell", Qt::CaseInsensitive))
+    return MainWindow::tr(
+        "Davies equation as fallback; Truesdell–Jones (extended "
+        "Debye–Hückel with per-ion size parameters) where parameters are "
+        "tabulated. Typically valid up to I ≈ 2 m.");
+  if (model.contains("Davies", Qt::CaseInsensitive))
+    return MainWindow::tr(
+        "Davies equation: a simplified extended Debye–Hückel form. "
+        "Typically valid up to I ≈ 0.5 m.");
+  return {};
+}
+
+}  // namespace
+
+QString MainWindow::buildDatabaseInfoHtml() const {
+  if (!db_info_) return tr("(no database loaded)");
+  const auto& info = *db_info_;
+  const QFileInfo fi(current_database_path_);
+  const QString model = QString::fromStdString(info.activityModelName());
+  const QString desc  = QString::fromStdString(info.databaseDescription());
+
+  QString html;
+  html += QStringLiteral("<h2>%1</h2>").arg(fi.fileName());
+  html += QStringLiteral("<p style='color:#666; font-size:11px;'>%1</p>")
+              .arg(fi.absoluteFilePath().toHtmlEscaped());
+
+  html += QStringLiteral("<h3>Activity coefficient model</h3>");
+  html += QStringLiteral("<p><b>%1</b></p>").arg(model);
+  const QString note = activityValidityNote(model);
+  if (!note.isEmpty())
+    html += QStringLiteral("<p>%1</p>").arg(note);
+  html += QStringLiteral(
+      "<p style='color:#555;'>All PHREEQC activity models are members of the "
+      "Debye–Hückel family or its empirical extensions. There is no separate "
+      "&ldquo;pure Debye–Hückel&rdquo; (Güntelberg) option; Davies is the "
+      "default short-range model.</p>");
+
+  if (!desc.isEmpty()) {
+    html += QStringLiteral("<h3>Provenance / intended use</h3>");
+    html += QStringLiteral("<p>%1</p>").arg(desc);
+  }
+
+  html += QStringLiteral("<h3>Statistics</h3>");
+  html += QStringLiteral("<ul>");
+  html += QStringLiteral("<li>%1 master species entries (elements + redox states)</li>")
+              .arg(info.entries().size());
+  html += QStringLiteral("<li>%1 aqueous species with parsed formation reactions</li>")
+              .arg(info.aqueousReactions().size());
+  html += QStringLiteral("<li>%1 minerals / gases (phases)</li>")
+              .arg(info.phases().size());
+  html += QStringLiteral("</ul>");
+
+  // Element list, compact.
+  QStringList elems;
+  for (const auto& e : info.entries()) {
+    if (e.element.find('(') == std::string::npos)
+      elems << QString::fromStdString(e.element);
+  }
+  if (!elems.isEmpty()) {
+    html += QStringLiteral("<h3>Elements</h3><p style='font-family:monospace;'>%1</p>")
+                .arg(elems.join(QStringLiteral(", ")));
+  }
+  return html;
 }
 
 }

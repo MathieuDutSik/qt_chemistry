@@ -1,5 +1,6 @@
 #include "kernel/DatabaseInfo.h"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <locale>
@@ -98,6 +99,73 @@ std::string definedSpecies(const std::string& equation,
   return species.back();
 }
 
+std::string toLower(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return s;
+}
+
+std::string baseName(const std::string& path) {
+  const auto slash = path.find_last_of("/\\");
+  return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// Built-in registry of database provenance / intended use. Lookup is on
+// lowercased basename. Unknown databases fall through to an empty string.
+std::string lookupDescription(const std::string& path) {
+  static const std::map<std::string, std::string> kReg = {
+    {"phreeqc.dat",
+     "General-purpose USGS PHREEQC database; T,P-dependent for dilute "
+     "to moderately saline waters."},
+    {"wateq4f.dat",
+     "USGS WATEQ4F speciation database (extended Debye-Huckel)."},
+    {"minteq.dat",
+     "USEPA MINTEQA2 thermodynamic database."},
+    {"minteq.v4.dat",
+     "USEPA MINTEQA2 v4 thermodynamic database."},
+    {"llnl.dat",
+     "Lawrence Livermore Lab compilation (thermo.com.V8.R6.230); large "
+     "species set, high T/P."},
+    {"pitzer.dat",
+     "Pitzer ion-interaction model for high-salinity brines and "
+     "evaporites (Na-K-Mg-Ca-Cl-SO4-H2O system + extensions)."},
+    {"sit.dat",
+     "Specific-ion Interaction Theory database; OECD/NEA TDB style, "
+     "common in radioactive-waste studies."},
+    {"frezchem.dat",
+     "FREZCHEM: Pitzer-based, cryogenic brines and sub-zero systems."},
+    {"coldchem.dat",
+     "ColdChem: cold/cryogenic chemistry."},
+    {"concrete_pz.dat",
+     "Cement / concrete chemistry with Pitzer model."},
+    {"concrete_phr.dat",
+     "Cement / concrete chemistry (Davies-style activity model)."},
+    {"core10.dat",
+     "ThermoChimie v10 (Andra); nuclear waste reference compilation."},
+    {"phreeqc_thermoddemv1.10_15dec2020.dat",
+     "Thermoddem (BRGM); ~1600 phases, radwaste / cement / mining."},
+    {"amm.dat",
+     "phreeqc.dat extension adding ammonia/ammonium speciation."},
+    {"iso.dat",
+     "Isotope speciation database (D, 13C, 18O, etc.)."},
+    {"kinec.v2.dat",
+     "Kinetic-rate compilation v2."},
+    {"kinec_v3.dat",
+     "Kinetic-rate compilation v3."},
+    {"tipping_hurley.dat",
+     "Tipping-Hurley humic/organic complexation (WHAM-style)."},
+    {"phreeqc_rates.dat",
+     "Example BASIC rate expressions for KINETICS."},
+    {"minimum.dat",
+     "Minimal database — bare master species, useful for didactic "
+     "exercises."},
+    {"stimela.dat",
+     "Stimela: water-treatment-focused database."},
+  };
+  const auto it = kReg.find(toLower(baseName(path)));
+  return it == kReg.end() ? std::string{} : it->second;
+}
+
 void applyProperty(DbReaction& r, const std::string& line) {
   const auto toks = tokenize(line);
   if (toks.empty()) return;
@@ -128,6 +196,8 @@ bool DatabaseInfo::load(const std::string& path, std::string* err) {
   aqueous_.clear();
   phase_by_name_.clear();
   aqueous_by_species_.clear();
+  activity_model_.clear();
+  description_ = lookupDescription(path);
 
   std::ifstream f(path);
   if (!f) { if (err) *err = "cannot open " + path; return false; }
@@ -140,6 +210,24 @@ bool DatabaseInfo::load(const std::string& path, std::string* err) {
   // lookups across passes. (File is < 1 MB even for the largest db.)
   std::vector<std::string> lines;
   for (std::string l; std::getline(f, l);) lines.push_back(l);
+
+  // Activity-model detection: which keyword blocks does the database
+  // contain? Priority matters because some databases include LLNL params
+  // *and* Pitzer (the latter wins).
+  bool has_pitzer = false, has_sit = false, has_llnl = false;
+  bool has_tj_gamma = false;
+  for (const auto& raw : lines) {
+    const std::string s = trim(stripComment(raw));
+    if (s == "PITZER") has_pitzer = true;
+    else if (s == "SIT") has_sit = true;
+    else if (s == "LLNL_AQUEOUS_MODEL_PARAMETERS") has_llnl = true;
+    else if (s.size() > 6 && s.substr(0, 7) == "-gamma ") has_tj_gamma = true;
+  }
+  if (has_pitzer)      activity_model_ = "Pitzer ion-interaction";
+  else if (has_sit)    activity_model_ = "SIT (Specific-ion Interaction)";
+  else if (has_llnl)   activity_model_ = "LLNL B-dot (Helgeson)";
+  else if (has_tj_gamma) activity_model_ = "Davies + Truesdell-Jones";
+  else                 activity_model_ = "Davies (default)";
 
   // First pass: collect master species so we can identify defined species
   // in SOLUTION_SPECIES later.
