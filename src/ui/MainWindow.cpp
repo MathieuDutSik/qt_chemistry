@@ -59,7 +59,7 @@ QTableWidgetItem* textItem(const QString& s) {
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent), session_(std::make_unique<PhreeqcSession>()) {
-  setWindowTitle(QStringLiteral("qt_chemistry — MVP"));
+  setWindowTitle(QStringLiteral("Chemical Equilibrium"));
   resize(1500, 900);
   database_dir_ = QString::fromUtf8(QTCHEM_DEFAULT_DATABASE_DIR);
 
