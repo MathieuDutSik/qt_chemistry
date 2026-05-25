@@ -3,6 +3,7 @@
 #include <cctype>
 #include <fstream>
 #include <locale>
+#include <set>
 #include <sstream>
 
 namespace qtchem {
@@ -54,28 +55,104 @@ std::string stripComment(const std::string& l) {
   return h == std::string::npos ? l : l.substr(0, h);
 }
 
+bool isIndented(const std::string& raw) {
+  return !raw.empty() && std::isspace(static_cast<unsigned char>(raw[0]));
 }
+
+bool isNumeric(const std::string& t) {
+  if (t.empty()) return false;
+  bool saw_dot = false;
+  size_t i = 0;
+  if (t[0] == '+' || t[0] == '-') i = 1;
+  if (i == t.size()) return false;
+  for (; i < t.size(); ++i) {
+    char c = t[i];
+    if (std::isdigit(static_cast<unsigned char>(c))) continue;
+    if (c == '.' && !saw_dot) { saw_dot = true; continue; }
+    if (c == 'e' || c == 'E') {
+      // Allow exponent
+      if (i + 1 < t.size() && (t[i+1] == '+' || t[i+1] == '-')) ++i;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+// Extract the species being defined from an aqueous reaction. Uses the
+// master-species set to skip "master" species on the RHS.
+std::string definedSpecies(const std::string& equation,
+                           const std::set<std::string>& master_species) {
+  const auto eq_pos = equation.find('=');
+  if (eq_pos == std::string::npos) return {};
+  const std::string rhs = trim(equation.substr(eq_pos + 1));
+  std::vector<std::string> species;
+  for (const auto& t : tokenize(rhs)) {
+    if (t == "+" || isNumeric(t)) continue;
+    species.push_back(t);
+  }
+  if (species.empty()) return {};
+  for (const auto& s : species) {
+    if (!master_species.count(s)) return s;
+  }
+  return species.back();
+}
+
+void applyProperty(DbReaction& r, const std::string& line) {
+  const auto toks = tokenize(line);
+  if (toks.empty()) return;
+  std::string key = toks[0];
+  if (!key.empty() && key[0] == '-') key.erase(0, 1);
+  if (key == "log_k" || key == "logk") {
+    if (toks.size() >= 2) { r.has_log_k = true; r.log_k = parseDoubleC(toks[1]); }
+  } else if (key == "delta_h") {
+    if (toks.size() >= 2) {
+      r.has_delta_h = true;
+      r.delta_h = parseDoubleC(toks[1]);
+      if (toks.size() >= 3) r.delta_h_unit = toks[2];
+    }
+  } else if (key == "analytical_expression" ||
+             key == "analytic" || key == "a_e") {
+    for (size_t i = 1; i < toks.size(); ++i)
+      r.analytical_coeffs.push_back(parseDoubleC(toks[i]));
+  }
+}
+
+}  // namespace
 
 bool DatabaseInfo::load(const std::string& path, std::string* err) {
   entries_.clear();
   by_element_.clear();
   species_to_element_.clear();
+  phases_.clear();
+  aqueous_.clear();
+  phase_by_name_.clear();
+  aqueous_by_species_.clear();
 
   std::ifstream f(path);
   if (!f) { if (err) *err = "cannot open " + path; return false; }
 
-  std::string line;
-  bool inSection = false;
-  while (std::getline(f, line)) {
-    std::string s = trim(stripComment(line));
+  enum class Section { None, MasterSpecies, SolutionSpecies, Phases };
+  Section sec = Section::None;
+  DbReaction* current = nullptr;
+
+  // Pass 1: read the whole file into memory so we can do master-species
+  // lookups across passes. (File is < 1 MB even for the largest db.)
+  std::vector<std::string> lines;
+  for (std::string l; std::getline(f, l);) lines.push_back(l);
+
+  // First pass: collect master species so we can identify defined species
+  // in SOLUTION_SPECIES later.
+  for (const auto& raw : lines) {
+    const std::string s = trim(stripComment(raw));
     if (s.empty()) continue;
     if (isKeywordLine(s)) {
-      inSection = (s == "SOLUTION_MASTER_SPECIES");
+      sec = (s == "SOLUTION_MASTER_SPECIES") ? Section::MasterSpecies
+                                              : Section::None;
       continue;
     }
-    if (!inSection) continue;
-
-    auto toks = tokenize(s);
+    if (sec != Section::MasterSpecies) continue;
+    const auto toks = tokenize(s);
     if (toks.size() < 2) continue;
     MasterSpecies m;
     m.element = toks[0];
@@ -85,10 +162,61 @@ bool DatabaseInfo::load(const std::string& path, std::string* err) {
     if (toks.size() > 4) m.element_gfw = toks[4];
     if (!m.element_gfw.empty())
       m.element_gfw_value = parseDoubleC(m.element_gfw);
-
     by_element_.emplace(normalizeElement(m.element), entries_.size());
     species_to_element_.emplace(m.species, normalizeElement(m.element));
     entries_.push_back(std::move(m));
+  }
+
+  std::set<std::string> master_species_set;
+  for (const auto& e : entries_) master_species_set.insert(e.species);
+  // H+ and H2O and e- are conventionally master too.
+  master_species_set.insert("H+");
+  master_species_set.insert("H2O");
+  master_species_set.insert("e-");
+
+  // Second pass: PHASES and SOLUTION_SPECIES.
+  sec = Section::None;
+  for (const auto& raw : lines) {
+    const std::string s_nc = stripComment(raw);
+    const std::string s = trim(s_nc);
+    if (s.empty()) continue;
+    if (isKeywordLine(s)) {
+      if (s == "PHASES") sec = Section::Phases;
+      else if (s == "SOLUTION_SPECIES") sec = Section::SolutionSpecies;
+      else sec = Section::None;
+      current = nullptr;
+      continue;
+    }
+
+    const bool indented = isIndented(s_nc);
+    if (sec == Section::Phases) {
+      if (!indented) {
+        phases_.push_back(DbReaction{});
+        current = &phases_.back();
+        current->name = s;
+        phase_by_name_.emplace(current->name, phases_.size() - 1);
+      } else if (current) {
+        if (s.find('=') != std::string::npos && current->equation.empty()) {
+          current->equation = s;
+        } else {
+          applyProperty(*current, s);
+        }
+      }
+    } else if (sec == Section::SolutionSpecies) {
+      if (!indented) {
+        if (s.find('=') == std::string::npos) { current = nullptr; continue; }
+        aqueous_.push_back(DbReaction{});
+        current = &aqueous_.back();
+        current->equation = s;
+        current->name = definedSpecies(s, master_species_set);
+        if (!current->name.empty())
+          aqueous_by_species_.emplace(current->name, aqueous_.size() - 1);
+      } else if (current) {
+        applyProperty(*current, s);
+      }
+    } else {
+      current = nullptr;
+    }
   }
   return true;
 }
@@ -124,6 +252,20 @@ double DatabaseInfo::atomicWeight(const std::string& name) const {
       parent && parent->element_gfw_value > 0)
     return parent->element_gfw_value;
   return 0.0;
+}
+
+std::optional<DbReaction>
+DatabaseInfo::findPhase(const std::string& name) const {
+  auto it = phase_by_name_.find(name);
+  if (it == phase_by_name_.end()) return std::nullopt;
+  return phases_[it->second];
+}
+
+std::optional<DbReaction>
+DatabaseInfo::findAqueous(const std::string& species) const {
+  auto it = aqueous_by_species_.find(species);
+  if (it == aqueous_by_species_.end()) return std::nullopt;
+  return aqueous_[it->second];
 }
 
 }

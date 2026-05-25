@@ -1,5 +1,6 @@
 #include "ui/MainWindow.h"
 
+#include "kernel/ChemFormat.h"
 #include "kernel/DatabaseInfo.h"
 #include "kernel/EquilibriumProblem.h"
 #include "kernel/PhreeqcOutputParser.h"
@@ -86,19 +87,19 @@ MainWindow::MainWindow(QWidget* parent)
   desc_table_ = new QTableWidget(0, 0);
   result_tabs_->addTab(desc_table_, tr("Solution properties"));
 
-  species_table_ = new QTableWidget(0, 7);
-  setHeaders(species_table_, {tr("Element"), tr("Species"),
+  species_table_ = new QTableWidget(0, 8);
+  setHeaders(species_table_, {tr("Element"), tr("Species"), tr("Pretty"),
                               tr("Molality"), tr("Activity"),
                               tr("log m"), tr("log a"), tr("log γ")});
   result_tabs_->addTab(species_table_, tr("Species"));
 
-  si_table_ = new QTableWidget(0, 5);
-  setHeaders(si_table_, {tr("Phase"), tr("SI"), tr("log IAP"),
-                         tr("log K"), tr("Formula")});
+  si_table_ = new QTableWidget(0, 6);
+  setHeaders(si_table_, {tr("Phase"), tr("Reaction"), tr("log K"),
+                         tr("SI"), tr("log IAP"), tr("Formula")});
   result_tabs_->addTab(si_table_, tr("Saturation indices"));
 
-  assemblage_table_ = new QTableWidget(0, 5);
-  setHeaders(assemblage_table_, {tr("Phase"), tr("SI"),
+  assemblage_table_ = new QTableWidget(0, 6);
+  setHeaders(assemblage_table_, {tr("Phase"), tr("Reaction"), tr("SI"),
                                  tr("Initial (mol)"), tr("Final (mol)"),
                                  tr("Δ (mol)")});
   result_tabs_->addTab(assemblage_table_, tr("Phase assemblage"));
@@ -305,31 +306,51 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     const auto& s = final.species[i];
     species_table_->setItem(i, 0, textItem(QString::fromStdString(s.element)));
     species_table_->setItem(i, 1, textItem(QString::fromStdString(s.name)));
-    species_table_->setItem(i, 2, sciItem(s.molality));
-    species_table_->setItem(i, 3, sciItem(s.activity));
-    species_table_->setItem(i, 4, numItem(s.log_molality, 'f', 3));
-    species_table_->setItem(i, 5, numItem(s.log_activity, 'f', 3));
-    species_table_->setItem(i, 6, numItem(s.log_gamma, 'f', 3));
+    auto* pretty = textItem(prettifySpecies(s.name));
+    if (db_info_) {
+      if (auto rxn = db_info_->findAqueous(s.name)) {
+        pretty->setToolTip(
+            tr("%1\nlog K = %2")
+                .arg(prettifyReaction(rxn->equation))
+                .arg(rxn->has_log_k ? QString::number(rxn->log_k, 'f', 3)
+                                    : tr("(unknown)")));
+      }
+    }
+    species_table_->setItem(i, 2, pretty);
+    species_table_->setItem(i, 3, sciItem(s.molality));
+    species_table_->setItem(i, 4, sciItem(s.activity));
+    species_table_->setItem(i, 5, numItem(s.log_molality, 'f', 3));
+    species_table_->setItem(i, 6, numItem(s.log_activity, 'f', 3));
+    species_table_->setItem(i, 7, numItem(s.log_gamma, 'f', 3));
   }
+
+  auto reactionFor = [&](const std::string& phase) -> QString {
+    if (!db_info_) return {};
+    if (auto r = db_info_->findPhase(phase))
+      return prettifyReaction(r->equation);
+    return {};
+  };
 
   si_table_->setRowCount(po.saturation.size());
   for (size_t i = 0; i < po.saturation.size(); ++i) {
     const auto& s = po.saturation[i];
     si_table_->setItem(i, 0, textItem(QString::fromStdString(s.phase)));
-    si_table_->setItem(i, 1, numItem(s.si, 'f', 3));
-    si_table_->setItem(i, 2, numItem(s.log_iap, 'f', 3));
-    si_table_->setItem(i, 3, numItem(s.log_k, 'f', 3));
-    si_table_->setItem(i, 4, textItem(QString::fromStdString(s.formula)));
+    si_table_->setItem(i, 1, textItem(reactionFor(s.phase)));
+    si_table_->setItem(i, 2, numItem(s.log_k, 'f', 3));
+    si_table_->setItem(i, 3, numItem(s.si, 'f', 3));
+    si_table_->setItem(i, 4, numItem(s.log_iap, 'f', 3));
+    si_table_->setItem(i, 5, textItem(QString::fromStdString(s.formula)));
   }
 
   assemblage_table_->setRowCount(po.assemblage.size());
   for (size_t i = 0; i < po.assemblage.size(); ++i) {
     const auto& a = po.assemblage[i];
     assemblage_table_->setItem(i, 0, textItem(QString::fromStdString(a.phase)));
-    assemblage_table_->setItem(i, 1, numItem(a.si, 'f', 3));
-    assemblage_table_->setItem(i, 2, sciItem(a.initial_moles));
-    assemblage_table_->setItem(i, 3, sciItem(a.final_moles));
-    assemblage_table_->setItem(i, 4, sciItem(a.delta_moles));
+    assemblage_table_->setItem(i, 1, textItem(reactionFor(a.phase)));
+    assemblage_table_->setItem(i, 2, numItem(a.si, 'f', 3));
+    assemblage_table_->setItem(i, 3, sciItem(a.initial_moles));
+    assemblage_table_->setItem(i, 4, sciItem(a.final_moles));
+    assemblage_table_->setItem(i, 5, sciItem(a.delta_moles));
   }
 
   for (QTableWidget* t : {totals_table_, species_table_, si_table_,
