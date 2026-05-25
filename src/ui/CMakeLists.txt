@@ -4,7 +4,9 @@ qt_add_library(qtchem_ui STATIC
   SolutionPanel.h
   SolutionPanel.cpp
   HtmlDelegate.h
-  HtmlDelegate.cpp)
+  HtmlDelegate.cpp
+  ChemDelegate.h
+  ChemDelegate.cpp)
 
 target_include_directories(qtchem_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 

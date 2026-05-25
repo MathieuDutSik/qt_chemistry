@@ -5,6 +5,7 @@
 #include "kernel/EquilibriumProblem.h"
 #include "kernel/PhreeqcOutputParser.h"
 #include "kernel/PhreeqcSession.h"
+#include "ui/ChemDelegate.h"
 #include "ui/HtmlDelegate.h"
 #include "ui/SolutionPanel.h"
 
@@ -92,20 +93,23 @@ MainWindow::MainWindow(QWidget* parent)
   setHeaders(species_table_, {tr("Element"), tr("Species"), tr("Pretty"),
                               tr("Molality"), tr("Activity"),
                               tr("log m"), tr("log a"), tr("log γ")});
-  species_table_->setItemDelegateForColumn(2, new HtmlDelegate(this));
+  species_table_->setItemDelegateForColumn(
+      2, new ChemDelegate(ChemDelegate::Mode::Species, this));
   result_tabs_->addTab(species_table_, tr("Species"));
 
   si_table_ = new QTableWidget(0, 6);
   setHeaders(si_table_, {tr("Phase"), tr("Reaction"), tr("log K"),
                          tr("SI"), tr("log IAP"), tr("Formula")});
-  si_table_->setItemDelegateForColumn(1, new HtmlDelegate(this));
+  si_table_->setItemDelegateForColumn(
+      1, new ChemDelegate(ChemDelegate::Mode::Reaction, this));
   result_tabs_->addTab(si_table_, tr("Saturation indices"));
 
   assemblage_table_ = new QTableWidget(0, 6);
   setHeaders(assemblage_table_, {tr("Phase"), tr("Reaction"), tr("SI"),
                                  tr("Initial (mol)"), tr("Final (mol)"),
                                  tr("Δ (mol)")});
-  assemblage_table_->setItemDelegateForColumn(1, new HtmlDelegate(this));
+  assemblage_table_->setItemDelegateForColumn(
+      1, new ChemDelegate(ChemDelegate::Mode::Reaction, this));
   result_tabs_->addTab(assemblage_table_, tr("Phase assemblage"));
 
   input_view_ = new QPlainTextEdit;
@@ -310,7 +314,8 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     const auto& s = final.species[i];
     species_table_->setItem(i, 0, textItem(QString::fromStdString(s.element)));
     species_table_->setItem(i, 1, textItem(QString::fromStdString(s.name)));
-    auto* pretty = textItem(htmlPrettifySpecies(s.name));
+    // Pretty column: raw species name; ChemDelegate renders it.
+    auto* pretty = textItem(QString::fromStdString(s.name));
     if (db_info_) {
       if (auto rxn = db_info_->findAqueous(s.name)) {
         pretty->setToolTip(
@@ -328,10 +333,13 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     species_table_->setItem(i, 7, numItem(s.log_gamma, 'f', 3));
   }
 
+  // For Reaction columns the cell text is the raw PHREEQC equation
+  // ("CaCO3 = CO3-2 + Ca+2"); ChemDelegate renders it. The phase name is
+  // stashed in kPhaseNameRole so the delegate can apply (g)/(aq) tags.
   auto reactionFor = [&](const std::string& phase) -> QString {
     if (!db_info_) return {};
     if (auto r = db_info_->findPhase(phase))
-      return htmlPrettifyPhaseReaction(phase, r->equation);
+      return QString::fromStdString(r->equation);
     return {};
   };
 
@@ -339,7 +347,10 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   for (size_t i = 0; i < po.saturation.size(); ++i) {
     const auto& s = po.saturation[i];
     si_table_->setItem(i, 0, textItem(QString::fromStdString(s.phase)));
-    si_table_->setItem(i, 1, textItem(reactionFor(s.phase)));
+    auto* rxn = textItem(reactionFor(s.phase));
+    rxn->setData(ChemDelegate::kPhaseNameRole,
+                 QString::fromStdString(s.phase));
+    si_table_->setItem(i, 1, rxn);
     si_table_->setItem(i, 2, numItem(s.log_k, 'f', 3));
     si_table_->setItem(i, 3, numItem(s.si, 'f', 3));
     si_table_->setItem(i, 4, numItem(s.log_iap, 'f', 3));
@@ -350,7 +361,10 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   for (size_t i = 0; i < po.assemblage.size(); ++i) {
     const auto& a = po.assemblage[i];
     assemblage_table_->setItem(i, 0, textItem(QString::fromStdString(a.phase)));
-    assemblage_table_->setItem(i, 1, textItem(reactionFor(a.phase)));
+    auto* rxn = textItem(reactionFor(a.phase));
+    rxn->setData(ChemDelegate::kPhaseNameRole,
+                 QString::fromStdString(a.phase));
+    assemblage_table_->setItem(i, 1, rxn);
     assemblage_table_->setItem(i, 2, numItem(a.si, 'f', 3));
     assemblage_table_->setItem(i, 3, sciItem(a.initial_moles));
     assemblage_table_->setItem(i, 4, sciItem(a.final_moles));
