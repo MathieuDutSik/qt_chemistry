@@ -5,6 +5,7 @@
 #include "kernel/EquilibriumProblem.h"
 #include "kernel/PhreeqcOutputParser.h"
 #include "kernel/PhreeqcSession.h"
+#include "ui/HtmlDelegate.h"
 #include "ui/SolutionPanel.h"
 
 #include <QComboBox>
@@ -91,17 +92,20 @@ MainWindow::MainWindow(QWidget* parent)
   setHeaders(species_table_, {tr("Element"), tr("Species"), tr("Pretty"),
                               tr("Molality"), tr("Activity"),
                               tr("log m"), tr("log a"), tr("log γ")});
+  species_table_->setItemDelegateForColumn(2, new HtmlDelegate(this));
   result_tabs_->addTab(species_table_, tr("Species"));
 
   si_table_ = new QTableWidget(0, 6);
   setHeaders(si_table_, {tr("Phase"), tr("Reaction"), tr("log K"),
                          tr("SI"), tr("log IAP"), tr("Formula")});
+  si_table_->setItemDelegateForColumn(1, new HtmlDelegate(this));
   result_tabs_->addTab(si_table_, tr("Saturation indices"));
 
   assemblage_table_ = new QTableWidget(0, 6);
   setHeaders(assemblage_table_, {tr("Phase"), tr("Reaction"), tr("SI"),
                                  tr("Initial (mol)"), tr("Final (mol)"),
                                  tr("Δ (mol)")});
+  assemblage_table_->setItemDelegateForColumn(1, new HtmlDelegate(this));
   result_tabs_->addTab(assemblage_table_, tr("Phase assemblage"));
 
   input_view_ = new QPlainTextEdit;
@@ -306,13 +310,13 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     const auto& s = final.species[i];
     species_table_->setItem(i, 0, textItem(QString::fromStdString(s.element)));
     species_table_->setItem(i, 1, textItem(QString::fromStdString(s.name)));
-    auto* pretty = textItem(prettifySpecies(s.name));
+    auto* pretty = textItem(htmlPrettifySpecies(s.name));
     if (db_info_) {
       if (auto rxn = db_info_->findAqueous(s.name)) {
         pretty->setToolTip(
-            tr("%1\nlog K = %2")
-                .arg(prettifyReaction(rxn->equation))
-                .arg(rxn->has_log_k ? QString::number(rxn->log_k, 'f', 3)
+            QStringLiteral("<p>%1<br>log K = %2</p>")
+                .arg(htmlPrettifyReaction(rxn->equation),
+                     rxn->has_log_k ? QString::number(rxn->log_k, 'f', 3)
                                     : tr("(unknown)")));
       }
     }
@@ -327,7 +331,7 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   auto reactionFor = [&](const std::string& phase) -> QString {
     if (!db_info_) return {};
     if (auto r = db_info_->findPhase(phase))
-      return prettifyReaction(r->equation);
+      return htmlPrettifyPhaseReaction(phase, r->equation);
     return {};
   };
 

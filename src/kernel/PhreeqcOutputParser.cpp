@@ -99,12 +99,24 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
     if (is_section(ln, "Phase assemblage")) {
       sec = ASSEMBLAGE; continue;
     }
-    if (starts_with(trim(ln), "Beginning of batch-reaction")) {
-      out.has_reaction_step = true;
-      sec = NONE; continue;
-    }
-    if (starts_with(trim(ln), "Beginning of initial solution")) {
-      sec = NONE; continue;
+    {
+      const std::string t = trim(ln);
+      if (starts_with(t, "Beginning of batch-reaction")) {
+        out.has_reaction_step = true;
+        sec = NONE; continue;
+      }
+      if (starts_with(t, "Beginning of initial solution")) {
+        sec = NONE; continue;
+      }
+      // PHREEQC keeps emitting non-section lines (footnotes, run summaries,
+      // simulation markers) after the last data section; without these
+      // sentinels they get treated as data rows.
+      if (starts_with(t, "End of simulation") ||
+          starts_with(t, "End of Run") ||
+          starts_with(t, "End of run") ||
+          starts_with(t, "Reading input")) {
+        sec = NONE; continue;
+      }
     }
 
     switch (sec) {
