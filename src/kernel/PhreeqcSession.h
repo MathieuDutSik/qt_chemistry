@@ -43,6 +43,10 @@ public:
 private:
   std::unique_ptr<IPhreeqc> impl_;
   bool database_loaded_ = false;
+  // True if the in-memory species database has been mutated by a previous
+  // activity-override run (SOLUTION_SPECIES overrides persist across calls
+  // to RunString, so we must reload before any non-overridden run).
+  bool database_dirtied_ = false;
   std::string database_path_;
 };
 

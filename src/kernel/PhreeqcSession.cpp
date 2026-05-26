@@ -1,4 +1,5 @@
 #include "kernel/PhreeqcSession.h"
+#include "kernel/DatabaseInfo.h"
 #include "kernel/EquilibriumProblem.h"
 
 #include <IPhreeqc.hpp>
@@ -47,6 +48,7 @@ bool PhreeqcSession::loadDatabase(const std::string& path, std::string* err) {
   }
   database_loaded_ = true;
   database_path_ = path;
+  database_dirtied_ = false;
   return true;
 }
 
@@ -100,7 +102,19 @@ SolveResult PhreeqcSession::runRawInput(const std::string& input) {
 
 SolveResult PhreeqcSession::solveEquilibrium(const EquilibriumProblem& p,
                                              const DatabaseInfo* db) {
-  return runRawInput(p.toPhreeqcInput(db));
+  // A previous override run may have mutated the species database; the
+  // mutations persist across RunString calls. If we're now asked for the
+  // database default, reload to restore the pristine model.
+  if (p.activity_override == ActivityOverride::UseDatabase &&
+      database_dirtied_ && !database_path_.empty()) {
+    std::string err;
+    loadDatabase(database_path_, &err);  // resets database_dirtied_
+  }
+  SolveResult r = runRawInput(p.toPhreeqcInput(db));
+  if (p.activity_override != ActivityOverride::UseDatabase) {
+    database_dirtied_ = true;
+  }
+  return r;
 }
 
 }

@@ -14,6 +14,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -484,8 +485,12 @@ QString MainWindow::buildDatabaseInfoHtml() const {
       elems << QString::fromStdString(e.element);
   }
   if (!elems.isEmpty()) {
-    html += QStringLiteral("<h3>Elements</h3><p style='font-family:monospace;'>%1</p>")
-                .arg(elems.join(QStringLiteral(", ")));
+    const QString mono =
+        QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+    html += QStringLiteral("<h3>Elements</h3>"
+                            "<p style='font-family:\"%1\";'>%2</p>")
+                .arg(mono.toHtmlEscaped(),
+                     elems.join(QStringLiteral(", ")));
   }
   return html;
 }
