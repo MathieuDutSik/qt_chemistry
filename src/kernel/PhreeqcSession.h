@@ -9,6 +9,7 @@ class IPhreeqc;
 
 namespace qtchem {
 
+class DatabaseInfo;
 struct EquilibriumProblem;
 
 struct SolveResult {
@@ -32,7 +33,10 @@ public:
   bool databaseLoaded() const { return database_loaded_; }
   const std::string& databasePath() const { return database_path_; }
 
-  SolveResult solveEquilibrium(const EquilibriumProblem&);
+  // Pass `db` if the problem uses an activity-coefficient override; it is
+  // forwarded to EquilibriumProblem::toPhreeqcInput().
+  SolveResult solveEquilibrium(const EquilibriumProblem&,
+                               const DatabaseInfo* db = nullptr);
 
   SolveResult runRawInput(const std::string& phreeqc_input);
 

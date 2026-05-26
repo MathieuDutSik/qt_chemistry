@@ -98,8 +98,9 @@ SolveResult PhreeqcSession::runRawInput(const std::string& input) {
   return r;
 }
 
-SolveResult PhreeqcSession::solveEquilibrium(const EquilibriumProblem& p) {
-  return runRawInput(p.toPhreeqcInput());
+SolveResult PhreeqcSession::solveEquilibrium(const EquilibriumProblem& p,
+                                             const DatabaseInfo* db) {
+  return runRawInput(p.toPhreeqcInput(db));
 }
 
 }

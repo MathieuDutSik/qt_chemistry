@@ -6,6 +6,20 @@
 
 namespace qtchem {
 
+class DatabaseInfo;
+
+// Override the database's per-species activity-coefficient model by
+// re-emitting every aqueous reaction with a Truesdell-Jones `-gamma a b`
+// that mathematically reduces to:
+//   DebyeHuckel : log γ = -A·z²·√I    (a=0, b=0, "limiting law")
+//   Ideal      : log γ ≈ 0           (a=1e10, b=0, gives γ ≈ 1)
+// Use ::UseDatabase to leave the loaded model intact.
+enum class ActivityOverride {
+  UseDatabase,
+  DebyeHuckel,
+  Ideal,
+};
+
 struct SolutionComponent {
   std::string element;
   double total = 0.0;
@@ -41,8 +55,12 @@ struct EquilibriumProblem {
   double water_kg = 1.0;
   std::vector<PhaseConstraint> phases;
   std::string title;
+  ActivityOverride activity_override = ActivityOverride::UseDatabase;
 
-  std::string toPhreeqcInput() const;
+  // `db` is required when `activity_override != UseDatabase`, because
+  // overriding requires enumerating every aqueous formation reaction in
+  // the database to re-emit it with the chosen `-gamma`.
+  std::string toPhreeqcInput(const DatabaseInfo* db = nullptr) const;
 };
 
 }

@@ -50,6 +50,7 @@ private:
   QDoubleSpinBox* ph_si_ = nullptr;
   QLineEdit* charge_el_ = nullptr;
   QLabel* db_hint_ = nullptr;
+  QComboBox* activity_override_ = nullptr;
 
   std::shared_ptr<const DatabaseInfo> db_info_;
 };

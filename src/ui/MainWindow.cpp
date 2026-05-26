@@ -189,7 +189,7 @@ void MainWindow::onDatabaseChanged(int index) {
 void MainWindow::onRun() {
   QStringList warnings;
   const auto problem = solution_panel_->buildProblem(&warnings);
-  const auto r = session_->solveEquilibrium(problem);
+  const auto r = session_->solveEquilibrium(problem, db_info_.get());
   input_view_->setPlainText(QString::fromStdString(r.raw_input));
   output_view_->setPlainText(QString::fromStdString(r.raw_output));
   if (!warnings.isEmpty()) {

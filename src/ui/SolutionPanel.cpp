@@ -58,6 +58,20 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   ph_extra->addWidget(ph_phase_);
   ph_extra->addWidget(ph_si_);
   state->addRow(QString(), ph_extra);
+
+  activity_override_ = new QComboBox;
+  activity_override_->addItem(tr("From database (default)"),
+                              int(ActivityOverride::UseDatabase));
+  activity_override_->addItem(tr("Debye–Hückel limiting law  (γ from -A z² √I)"),
+                              int(ActivityOverride::DebyeHuckel));
+  activity_override_->addItem(tr("Ideal — γ = 1  (schoolbook)"),
+                              int(ActivityOverride::Ideal));
+  activity_override_->setToolTip(tr(
+      "Overrides the database's activity-coefficient model by re-emitting "
+      "every aqueous reaction with -gamma. Use 'Debye–Hückel' for the pure "
+      "limiting law (valid only at very low ionic strength) or 'Ideal' for "
+      "the schoolbook case where activity equals molality."));
+  state->addRow(tr("Activity model"), activity_override_);
   root->addLayout(state);
 
   db_hint_ = new QLabel(tr(
@@ -212,6 +226,8 @@ EquilibriumProblem SolutionPanel::buildProblem(QStringList* warnings) const {
   p.ph.phase = ph_phase_->text().toStdString();
   p.ph.target_si = ph_si_->value();
   p.ph.charge_element = charge_el_->text().toStdString();
+  p.activity_override =
+      ActivityOverride(activity_override_->currentData().toInt());
 
   for (int r = 0; r < table_->rowCount(); ++r) {
     auto* el = table_->item(r, kColElement);

@@ -1,13 +1,50 @@
 #include "kernel/EquilibriumProblem.h"
 
+#include "kernel/DatabaseInfo.h"
+
+#include <locale>
 #include <sstream>
 
 namespace qtchem {
 
-std::string EquilibriumProblem::toPhreeqcInput() const {
+namespace {
+
+void emitActivityOverride(std::ostream& os, const DatabaseInfo& db,
+                          ActivityOverride mode) {
+  const char* gamma = (mode == ActivityOverride::DebyeHuckel)
+                          ? "0 0"
+                          : "1e10 0";
+  os << "SOLUTION_SPECIES\n";
+  for (const auto& r : db.aqueousReactions()) {
+    if (r.name == "e-" || r.name == "H2O" || r.equation.empty()) continue;
+    os << "    " << r.equation << '\n';
+    if (!r.analytical_coeffs.empty()) {
+      os << "        -analytical_expression";
+      for (double c : r.analytical_coeffs) os << ' ' << c;
+      os << '\n';
+    } else if (r.has_log_k) {
+      os << "        log_k " << r.log_k << '\n';
+      if (r.has_delta_h) {
+        os << "        delta_h " << r.delta_h;
+        if (!r.delta_h_unit.empty()) os << ' ' << r.delta_h_unit;
+        os << '\n';
+      }
+    }
+    os << "        -gamma " << gamma << '\n';
+  }
+}
+
+}  // namespace
+
+std::string EquilibriumProblem::toPhreeqcInput(const DatabaseInfo* db) const {
   std::ostringstream os;
+  os.imbue(std::locale::classic());
   if (!title.empty())
     os << "TITLE " << title << '\n';
+
+  if (activity_override != ActivityOverride::UseDatabase && db) {
+    emitActivityOverride(os, *db, activity_override);
+  }
 
   os << "SOLUTION 1\n";
   os << "    temp      " << temperature_c << '\n';
