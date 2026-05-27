@@ -28,6 +28,7 @@ private slots:
   void onRun();
   void onShowDatabaseInfo();
   void onDuplicateDatabase();
+  void onEditDatabase();
 
 private:
   void populateDatabaseList(const QString& selectAbsolutePath = QString());
@@ -41,6 +42,7 @@ private:
   QComboBox* db_combo_ = nullptr;
   QPushButton* info_btn_ = nullptr;
   QPushButton* duplicate_btn_ = nullptr;
+  QPushButton* edit_btn_ = nullptr;
   QLabel* db_status_ = nullptr;
   SolutionPanel* solution_panel_ = nullptr;
   QTabWidget* result_tabs_ = nullptr;

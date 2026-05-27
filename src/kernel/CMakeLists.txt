@@ -7,6 +7,8 @@ add_library(qtchem_kernel STATIC
   PhreeqcOutputParser.cpp
   DatabaseInfo.h
   DatabaseInfo.cpp
+  EditableDatabase.h
+  EditableDatabase.cpp
   ChemFormat.h
   ChemFormat.cpp)
 

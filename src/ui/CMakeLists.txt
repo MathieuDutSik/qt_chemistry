@@ -6,7 +6,9 @@ qt_add_library(qtchem_ui STATIC
   HtmlDelegate.h
   HtmlDelegate.cpp
   ChemDelegate.h
-  ChemDelegate.cpp)
+  ChemDelegate.cpp
+  DatabaseEditorDialog.h
+  DatabaseEditorDialog.cpp)
 
 target_include_directories(qtchem_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 

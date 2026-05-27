@@ -6,6 +6,7 @@
 #include "kernel/PhreeqcOutputParser.h"
 #include "kernel/PhreeqcSession.h"
 #include "ui/ChemDelegate.h"
+#include "ui/DatabaseEditorDialog.h"
 #include "ui/HtmlDelegate.h"
 #include "ui/SolutionPanel.h"
 
@@ -108,6 +109,12 @@ MainWindow::MainWindow(QWidget* parent)
       tr("Copy the current database to your user databases folder so you "
          "can edit it. The original is never modified."));
   top->addWidget(duplicate_btn_);
+  edit_btn_ = new QPushButton(tr("Edit…"));
+  edit_btn_->setEnabled(false);
+  edit_btn_->setToolTip(
+      tr("Edit this user database. Built-in databases are read-only; "
+         "use Duplicate… first to create an editable copy."));
+  top->addWidget(edit_btn_);
   top->addStretch(1);
   root->addLayout(top);
 
@@ -192,6 +199,8 @@ MainWindow::MainWindow(QWidget* parent)
           this, &MainWindow::onShowDatabaseInfo);
   connect(duplicate_btn_, &QPushButton::clicked,
           this, &MainWindow::onDuplicateDatabase);
+  connect(edit_btn_, &QPushButton::clicked,
+          this, &MainWindow::onEditDatabase);
   connect(solution_panel_, &SolutionPanel::runRequested,
           this, &MainWindow::onRun);
 
@@ -252,6 +261,7 @@ void MainWindow::onDatabaseChanged(int index) {
   if (path.isEmpty()) {
     db_status_->setText(tr("(no database)"));
     duplicate_btn_->setEnabled(false);
+    edit_btn_->setEnabled(false);
     info_btn_->setEnabled(false);
     return;
   }
@@ -270,13 +280,27 @@ void MainWindow::onDatabaseChanged(int index) {
       info_btn_->setEnabled(true);
     }
     duplicate_btn_->setEnabled(true);
+    edit_btn_->setEnabled(userWritable);
   } else {
     db_status_->setText(tr("load failed"));
     output_view_->setPlainText(QString::fromStdString(err));
     statusBar()->showMessage(tr("Database load failed"));
     info_btn_->setEnabled(false);
     duplicate_btn_->setEnabled(false);
+    edit_btn_->setEnabled(false);
   }
+}
+
+void MainWindow::onEditDatabase() {
+  if (current_database_path_.isEmpty()) return;
+  if (!isUserWritableDatabase(db_combo_->currentIndex())) return;
+  DatabaseEditorDialog dlg(current_database_path_, this);
+  if (dlg.exec() != QDialog::Accepted) return;
+  // The user saved edits to disk; reload the database so the running
+  // session sees the new content, and refresh the parsed info / panel.
+  onDatabaseChanged(db_combo_->currentIndex());
+  statusBar()->showMessage(
+      tr("Saved %1").arg(QFileInfo(current_database_path_).fileName()));
 }
 
 void MainWindow::onRun() {
