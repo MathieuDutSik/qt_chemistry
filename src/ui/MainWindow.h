@@ -27,17 +27,20 @@ private slots:
   void onDatabaseChanged(int index);
   void onRun();
   void onShowDatabaseInfo();
+  void onDuplicateDatabase();
 
 private:
-  void populateDatabaseList();
+  void populateDatabaseList(const QString& selectAbsolutePath = QString());
   void renderResults(const ParsedOutput& po);
   QString buildDatabaseInfoHtml() const;
+  bool isUserWritableDatabase(int index) const;
 
   std::unique_ptr<PhreeqcSession> session_;
   std::shared_ptr<DatabaseInfo> db_info_;
   QString current_database_path_;
   QComboBox* db_combo_ = nullptr;
   QPushButton* info_btn_ = nullptr;
+  QPushButton* duplicate_btn_ = nullptr;
   QLabel* db_status_ = nullptr;
   SolutionPanel* solution_panel_ = nullptr;
   QTabWidget* result_tabs_ = nullptr;
@@ -49,6 +52,7 @@ private:
   QPlainTextEdit* input_view_ = nullptr;
   QPlainTextEdit* output_view_ = nullptr;
   QString database_dir_;
+  QString user_database_dir_;
 };
 
 }

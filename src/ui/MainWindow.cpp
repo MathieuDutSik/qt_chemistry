@@ -13,14 +13,20 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSplitter>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -79,6 +85,10 @@ MainWindow::MainWindow(QWidget* parent)
   setWindowTitle(QStringLiteral("Chemical Equilibrium"));
   resize(1500, 900);
   database_dir_ = QString::fromUtf8(QTCHEM_DEFAULT_DATABASE_DIR);
+  user_database_dir_ =
+      QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+      + QStringLiteral("/databases");
+  QDir().mkpath(user_database_dir_);
 
   auto* central = new QWidget(this);
   auto* root = new QVBoxLayout(central);
@@ -92,6 +102,12 @@ MainWindow::MainWindow(QWidget* parent)
   info_btn_ = new QPushButton(tr("Information…"));
   info_btn_->setEnabled(false);
   top->addWidget(info_btn_);
+  duplicate_btn_ = new QPushButton(tr("Duplicate…"));
+  duplicate_btn_->setEnabled(false);
+  duplicate_btn_->setToolTip(
+      tr("Copy the current database to your user databases folder so you "
+         "can edit it. The original is never modified."));
+  top->addWidget(duplicate_btn_);
   top->addStretch(1);
   root->addLayout(top);
 
@@ -174,33 +190,77 @@ MainWindow::MainWindow(QWidget* parent)
           this, &MainWindow::onDatabaseChanged);
   connect(info_btn_, &QPushButton::clicked,
           this, &MainWindow::onShowDatabaseInfo);
+  connect(duplicate_btn_, &QPushButton::clicked,
+          this, &MainWindow::onDuplicateDatabase);
   connect(solution_panel_, &SolutionPanel::runRequested,
           this, &MainWindow::onRun);
 
-  if (db_combo_->count() > 0) onDatabaseChanged(db_combo_->currentIndex());
 }
 
 MainWindow::~MainWindow() = default;
 
-void MainWindow::populateDatabaseList() {
+void MainWindow::populateDatabaseList(const QString& selectAbsolutePath) {
+  const QSignalBlocker block(db_combo_);
   db_combo_->clear();
-  QDir d(database_dir_);
-  const auto entries = d.entryInfoList(
+
+  const auto builtin = QDir(database_dir_).entryInfoList(
       QStringList() << QStringLiteral("*.dat"), QDir::Files, QDir::Name);
-  for (const auto& fi : entries)
+  for (const auto& fi : builtin) {
     db_combo_->addItem(fi.fileName(), fi.absoluteFilePath());
-  if (entries.isEmpty())
+    db_combo_->setItemData(db_combo_->count() - 1, false, Qt::UserRole + 1);
+  }
+
+  const auto userFiles = QDir(user_database_dir_).entryInfoList(
+      QStringList() << QStringLiteral("*.dat"), QDir::Files, QDir::Name);
+  if (!userFiles.isEmpty()) {
+    if (!builtin.isEmpty()) db_combo_->insertSeparator(db_combo_->count());
+    for (const auto& fi : userFiles) {
+      db_combo_->addItem(fi.fileName(), fi.absoluteFilePath());
+      db_combo_->setItemData(db_combo_->count() - 1, true, Qt::UserRole + 1);
+    }
+  }
+
+  if (builtin.isEmpty() && userFiles.isEmpty()) {
     db_combo_->addItem(tr("(no .dat files in %1)").arg(database_dir_));
-  const int idx = db_combo_->findText(QStringLiteral("phreeqc.dat"));
-  if (idx >= 0) db_combo_->setCurrentIndex(idx);
+  }
+
+  int selectIdx = -1;
+  if (!selectAbsolutePath.isEmpty()) {
+    for (int i = 0; i < db_combo_->count(); ++i) {
+      if (db_combo_->itemData(i).toString() == selectAbsolutePath) {
+        selectIdx = i; break;
+      }
+    }
+  }
+  if (selectIdx < 0) selectIdx = db_combo_->findText(QStringLiteral("phreeqc.dat"));
+  if (selectIdx < 0) {
+    for (int i = 0; i < db_combo_->count(); ++i) {
+      if (!db_combo_->itemData(i).toString().isEmpty()) { selectIdx = i; break; }
+    }
+  }
+  if (selectIdx >= 0) db_combo_->setCurrentIndex(selectIdx);
+  onDatabaseChanged(db_combo_->currentIndex());
+}
+
+bool MainWindow::isUserWritableDatabase(int index) const {
+  if (index < 0) return false;
+  return db_combo_->itemData(index, Qt::UserRole + 1).toBool();
 }
 
 void MainWindow::onDatabaseChanged(int index) {
   const QString path = db_combo_->itemData(index).toString();
-  if (path.isEmpty()) { db_status_->setText(tr("(no database)")); return; }
+  if (path.isEmpty()) {
+    db_status_->setText(tr("(no database)"));
+    duplicate_btn_->setEnabled(false);
+    info_btn_->setEnabled(false);
+    return;
+  }
+  const bool userWritable = isUserWritableDatabase(index);
   std::string err;
   if (session_->loadDatabase(path.toStdString(), &err)) {
-    db_status_->setText(tr("loaded ✓"));
+    db_status_->setText(userWritable
+                            ? tr("loaded ✓ — user copy (editable)")
+                            : tr("loaded ✓ — built-in (read-only)"));
     statusBar()->showMessage(tr("Loaded %1").arg(QFileInfo(path).fileName()));
     auto info = std::make_shared<DatabaseInfo>();
     if (info->load(path.toStdString())) {
@@ -209,11 +269,13 @@ void MainWindow::onDatabaseChanged(int index) {
       solution_panel_->setDatabaseInfo(db_info_);
       info_btn_->setEnabled(true);
     }
+    duplicate_btn_->setEnabled(true);
   } else {
     db_status_->setText(tr("load failed"));
     output_view_->setPlainText(QString::fromStdString(err));
     statusBar()->showMessage(tr("Database load failed"));
     info_btn_->setEnabled(false);
+    duplicate_btn_->setEnabled(false);
   }
 }
 
@@ -420,6 +482,78 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   for (QTableWidget* t : {totals_table_, species_table_, si_table_,
                           assemblage_table_, desc_table_})
     t->resizeColumnsToContents();
+}
+
+void MainWindow::onDuplicateDatabase() {
+  if (current_database_path_.isEmpty()) return;
+  const QFileInfo src(current_database_path_);
+
+  QDialog dlg(this);
+  dlg.setWindowTitle(tr("Duplicate database"));
+  auto* form = new QFormLayout;
+
+  auto* srcLabel = new QLabel(src.fileName());
+  srcLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  form->addRow(tr("Source:"), srcLabel);
+
+  auto* destEdit = new QLineEdit;
+  destEdit->setText(src.completeBaseName() + QStringLiteral("-copy.dat"));
+  destEdit->selectAll();
+  form->addRow(tr("Save as:"), destEdit);
+
+  auto* hint = new QLabel(
+      tr("The copy will be saved in:\n%1\nThe original is never modified.")
+          .arg(QDir::toNativeSeparators(user_database_dir_)));
+  hint->setStyleSheet(QStringLiteral("color:#666;"));
+  hint->setWordWrap(true);
+
+  auto* buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+
+  auto* outer = new QVBoxLayout(&dlg);
+  outer->addLayout(form);
+  outer->addWidget(hint);
+  outer->addWidget(buttons);
+
+  static const QRegularExpression kBadChars(
+      QStringLiteral("[/\\\\:?*\"<>|]"));
+
+  while (dlg.exec() == QDialog::Accepted) {
+    QString name = destEdit->text().trimmed();
+    if (!name.endsWith(QStringLiteral(".dat"), Qt::CaseInsensitive))
+      name += QStringLiteral(".dat");
+    if (name == QStringLiteral(".dat") || name.contains(kBadChars)) {
+      QMessageBox::warning(&dlg, tr("Invalid name"),
+          tr("Please enter a valid filename (no path separators or %1)."
+             ).arg(QStringLiteral("/\\:?*\"<>|")));
+      continue;
+    }
+    const QString dest = user_database_dir_ + QStringLiteral("/") + name;
+    if (QFile::exists(dest)) {
+      const auto ans = QMessageBox::question(&dlg, tr("Overwrite?"),
+          tr("A user database named '%1' already exists. Overwrite it?")
+              .arg(name));
+      if (ans != QMessageBox::Yes) continue;
+      if (!QFile::remove(dest)) {
+        QMessageBox::critical(&dlg, tr("Cannot overwrite"),
+            tr("Failed to remove existing file:\n%1").arg(dest));
+        continue;
+      }
+    }
+    if (!QFile::copy(current_database_path_, dest)) {
+      QMessageBox::critical(&dlg, tr("Copy failed"),
+          tr("Could not copy database to:\n%1").arg(dest));
+      continue;
+    }
+    QFile::setPermissions(dest,
+        QFile::ReadOwner | QFile::WriteOwner |
+        QFile::ReadGroup | QFile::ReadOther);
+    statusBar()->showMessage(tr("Created user database %1").arg(name));
+    populateDatabaseList(dest);
+    return;
+  }
 }
 
 void MainWindow::onShowDatabaseInfo() {
