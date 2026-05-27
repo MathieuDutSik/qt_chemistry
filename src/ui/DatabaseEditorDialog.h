@@ -2,6 +2,7 @@
 
 #include <QDialog>
 #include <QString>
+#include <vector>
 
 class QCheckBox;
 class QLabel;
@@ -43,11 +44,15 @@ class DatabaseEditorDialog : public QDialog {
   void onAddPhase();
   void onEditPhase();
   void onRemovePhase();
+  void onAddMaster();
+  void onEditMaster();
+  void onRemoveMaster();
 
  private:
   enum class AuthoritativeSource { Structured, Raw };
 
   void refreshAqueousTable();
+  void refreshMasterTable();
   void refreshPhasesTable();
   void refreshRawFromStructured();
   void markDirty();
@@ -62,13 +67,21 @@ class DatabaseEditorDialog : public QDialog {
 
   QTabWidget* tabs_ = nullptr;
   QTableWidget* aqueous_table_ = nullptr;
+  QTableWidget* master_table_ = nullptr;
   QTableWidget* phases_table_ = nullptr;
   QPushButton* aq_add_ = nullptr;
   QPushButton* aq_edit_ = nullptr;
   QPushButton* aq_remove_ = nullptr;
+  QPushButton* ms_add_ = nullptr;
+  QPushButton* ms_edit_ = nullptr;
+  QPushButton* ms_remove_ = nullptr;
   QPushButton* ph_add_ = nullptr;
   QPushButton* ph_edit_ = nullptr;
   QPushButton* ph_remove_ = nullptr;
+  // Mapping from a row in the partitioned tables to the entry's index in
+  // db_->aqueousSpecies(). Rebuilt by refresh*Table() each time.
+  std::vector<size_t> aqueous_row_to_index_;
+  std::vector<size_t> master_row_to_index_;
 
   QPlainTextEdit* raw_editor_ = nullptr;
   QCheckBox* raw_enable_box_ = nullptr;

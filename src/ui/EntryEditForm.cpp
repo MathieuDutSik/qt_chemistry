@@ -58,19 +58,41 @@ QString definedSpeciesQ(const QString& eq) {
 
 }  // namespace
 
-EntryEditForm::EntryEditForm(EditableEntry initial, bool is_phase,
+EntryEditForm::EntryEditForm(EditableEntry initial, Kind kind,
                               QWidget* parent)
-    : QDialog(parent), is_phase_(is_phase), entry_(std::move(initial)) {
-  setWindowTitle(is_phase ? tr("Edit phase") : tr("Edit aqueous species"));
+    : QDialog(parent), kind_(kind), entry_(std::move(initial)) {
+  switch (kind_) {
+    case Kind::Phase:    setWindowTitle(tr("Edit phase")); break;
+    case Kind::Aqueous:  setWindowTitle(tr("Edit aqueous species")); break;
+    case Kind::Master:   setWindowTitle(tr("Edit master species")); break;
+  }
 
   auto* layout = new QVBoxLayout(this);
   auto* form = new QFormLayout;
   layout->addLayout(form);
 
-  if (is_phase_) {
+  if (kind_ == Kind::Phase) {
     name_edit_ = new QLineEdit(QString::fromStdString(entry_.name));
     name_edit_->setPlaceholderText(tr("e.g. Calcite"));
     form->addRow(tr("Phase name:"), name_edit_);
+  } else if (kind_ == Kind::Master) {
+    name_edit_ = new QLineEdit(QString::fromStdString(entry_.name));
+    name_edit_->setFont(
+        QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    name_edit_->setPlaceholderText(tr("e.g. Zn+2, CO3-2, H+"));
+    form->addRow(tr("Species name:"), name_edit_);
+    auto* hint = new QLabel(tr(
+        "Master species declare the reference name for an element to "
+        "PHREEQC. The reaction is written as <code>name = name</code> "
+        "automatically; only the activity-coefficient parameters and "
+        "log K (typically 0) are meaningful here. Adding a new master "
+        "species also requires an entry in <code>"
+        "SOLUTION_MASTER_SPECIES</code> — edit that section in the Raw "
+        "text tab."));
+    hint->setTextFormat(Qt::RichText);
+    hint->setWordWrap(true);
+    hint->setStyleSheet(QStringLiteral("color:#666;"));
+    form->addRow(QString(), hint);
   } else {
     name_label_ = new QLabel;
     name_label_->setText(entry_.name.empty()
@@ -80,22 +102,23 @@ EntryEditForm::EntryEditForm(EditableEntry initial, bool is_phase,
     form->addRow(tr("Defined species:"), name_label_);
   }
 
-  equation_edit_ = new QLineEdit(QString::fromStdString(entry_.equation));
-  equation_edit_->setFont(
-      QFontDatabase::systemFont(QFontDatabase::FixedFont));
-  equation_edit_->setPlaceholderText(
-      is_phase_ ? tr("e.g. CaCO3 = CO3-2 + Ca+2")
-                : tr("e.g. CO3-2 + H+ = HCO3-"));
-  form->addRow(tr("Reaction:"), equation_edit_);
-
-  if (!is_phase_) {
-    connect(equation_edit_, &QLineEdit::textChanged, this,
-            [this](const QString& s) {
-              const auto d = definedSpeciesQ(s);
-              name_label_->setText(d.isEmpty()
-                                       ? tr("(derived from equation)")
-                                       : d);
-            });
+  if (kind_ != Kind::Master) {
+    equation_edit_ = new QLineEdit(QString::fromStdString(entry_.equation));
+    equation_edit_->setFont(
+        QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    equation_edit_->setPlaceholderText(
+        kind_ == Kind::Phase ? tr("e.g. CaCO3 = CO3-2 + Ca+2")
+                              : tr("e.g. CO3-2 + H+ = HCO3-"));
+    form->addRow(tr("Reaction:"), equation_edit_);
+    if (kind_ == Kind::Aqueous) {
+      connect(equation_edit_, &QLineEdit::textChanged, this,
+              [this](const QString& s) {
+                const auto d = definedSpeciesQ(s);
+                name_label_->setText(d.isEmpty()
+                                         ? tr("(derived from equation)")
+                                         : d);
+              });
+    }
   }
 
   // log K row.
@@ -207,31 +230,42 @@ EntryEditForm::EntryEditForm(EditableEntry initial, bool is_phase,
 }
 
 void EntryEditForm::onAccept() {
-  const QString eq = equation_edit_->text().trimmed();
-  if (!eq.contains(QLatin1Char('='))) {
-    QMessageBox::warning(this, tr("Invalid equation"),
-        tr("The reaction must contain an '=' sign."));
-    return;
-  }
-  if (is_phase_) {
+  if (kind_ == Kind::Master) {
     const QString nm = name_edit_->text().trimmed();
     if (nm.isEmpty()) {
       QMessageBox::warning(this, tr("Missing name"),
-          tr("Phase name cannot be empty."));
+          tr("Species name cannot be empty."));
       return;
     }
     entry_.name = nm.toStdString();
+    entry_.equation = (nm + QStringLiteral(" = ") + nm).toStdString();
   } else {
-    const QString d = definedSpeciesQ(eq);
-    if (d.isEmpty()) {
+    const QString eq = equation_edit_->text().trimmed();
+    if (!eq.contains(QLatin1Char('='))) {
       QMessageBox::warning(this, tr("Invalid equation"),
-          tr("Cannot derive a species name from the equation. The right-"
-             "hand side should contain at least one non-master species."));
+          tr("The reaction must contain an '=' sign."));
       return;
     }
-    entry_.name = d.toStdString();
+    if (kind_ == Kind::Phase) {
+      const QString nm = name_edit_->text().trimmed();
+      if (nm.isEmpty()) {
+        QMessageBox::warning(this, tr("Missing name"),
+            tr("Phase name cannot be empty."));
+        return;
+      }
+      entry_.name = nm.toStdString();
+    } else {
+      const QString d = definedSpeciesQ(eq);
+      if (d.isEmpty()) {
+        QMessageBox::warning(this, tr("Invalid equation"),
+            tr("Cannot derive a species name from the equation. The right-"
+               "hand side should contain at least one non-master species."));
+        return;
+      }
+      entry_.name = d.toStdString();
+    }
+    entry_.equation = eq.toStdString();
   }
-  entry_.equation = eq.toStdString();
 
   auto readOptionalDouble = [&](QCheckBox* present, QLineEdit* edit,
                                 bool* has, double* out, const char* label) {

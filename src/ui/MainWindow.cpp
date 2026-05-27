@@ -156,7 +156,18 @@ MainWindow::MainWindow(QWidget* parent)
     if (auto* h = species_table_->horizontalHeaderItem(c))
       h->setToolTip(speciesHeaderTips[c]);
   }
-  result_tabs_->addTab(species_table_, tr("Species"));
+  auto* species_tab = new QWidget;
+  auto* species_lay = new QVBoxLayout(species_tab);
+  species_lay->setContentsMargins(0, 0, 0, 0);
+  auto* species_help = new QLabel(
+      tr("<a href=\"#\">What do these columns mean?</a>"));
+  species_help->setTextFormat(Qt::RichText);
+  species_help->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+  connect(species_help, &QLabel::linkActivated, this,
+          &MainWindow::onShowSpeciesColumnHelp);
+  species_lay->addWidget(species_help);
+  species_lay->addWidget(species_table_, 1);
+  result_tabs_->addTab(species_tab, tr("Species"));
 
   si_table_ = new QTableWidget(0, 6);
   setHeaders(si_table_, {tr("Phase"), tr("Reaction"), tr("log K"),
@@ -506,6 +517,105 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   for (QTableWidget* t : {totals_table_, species_table_, si_table_,
                           assemblage_table_, desc_table_})
     t->resizeColumnsToContents();
+}
+
+void MainWindow::onShowSpeciesColumnHelp() {
+  QDialog dlg(this);
+  dlg.setWindowTitle(tr("Species table columns"));
+  dlg.resize(680, 520);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* browser = new QTextBrowser;
+  browser->setOpenExternalLinks(true);
+  browser->setHtml(tr(
+      "<h2>Species table columns</h2>"
+      "<p>Each row is one aqueous species present (or theoretically "
+      "possible) in the final equilibrium solution.</p>"
+      "<h3>Element</h3>"
+      "<p>The PHREEQC master element associated with this species "
+      "(e.g. <code>C</code> for <code>CO3-2</code>). Used to group rows.</p>"
+      "<h3>Species / Pretty</h3>"
+      "<p><b>Species</b> is the raw name as written in the PHREEQC "
+      "database (<code>CO3-2</code>). <b>Pretty</b> is the same name "
+      "typeset with subscripts and superscripts (CO<sub>3</sub><sup>2−</sup>). "
+      "Hover the Pretty cell to see the formation reaction and its "
+      "<i>log K</i>.</p>"
+      "<h3>Molality (mol/kgw)</h3>"
+      "<p>Symbol <i>m</i>. Moles of the species per kilogram of <i>water</i> "
+      "(not solution). This is the &ldquo;how much is there&rdquo; quantity. "
+      "Species with mathematically valid formation reactions are listed "
+      "even when their molality is essentially zero, because trace amounts "
+      "can still couple to redox or pH equilibria.</p>"
+      "<h3>Activity</h3>"
+      "<p>Symbol <i>a</i>. The thermodynamically effective concentration "
+      "that appears in mass-action (equilibrium) expressions. Related to "
+      "molality by the activity coefficient γ:</p>"
+      "<p style='margin-left:2em;'><i>a = γ · m</i></p>"
+      "<p>In ideal / infinitely-dilute solutions γ = 1 and <i>a = m</i>. "
+      "In real solutions γ deviates from 1 because of ion-ion "
+      "interactions; the chosen activity-coefficient model (Davies, "
+      "Truesdell-Jones, Pitzer, SIT, LLNL B-dot) determines how γ is "
+      "computed. The reference state is hypothetical 1 mol/kgw with "
+      "ideal-dilute behaviour, so <i>a</i> is dimensionless.</p>"
+      "<h3>log m</h3>"
+      "<p>Base-10 logarithm of molality: log<sub>10</sub>(<i>m</i>). "
+      "Convenient because aqueous concentrations span many decades. "
+      "A value of <code>−7</code> means 10⁻⁷ mol/kgw.</p>"
+      "<h3>log a</h3>"
+      "<p>Base-10 logarithm of activity: log<sub>10</sub>(<i>a</i>). "
+      "<b>This is what actually drives equilibria.</b> pH, for example, "
+      "is defined as <code>−log a(H+)</code>, not <code>−log m(H+)</code>. "
+      "Saturation indices and reaction quotients are written in terms of "
+      "log <i>a</i> too.</p>"
+      "<h3>log γ</h3>"
+      "<p>Base-10 logarithm of the activity coefficient: "
+      "log<sub>10</sub>(γ) = log <i>a</i> − log <i>m</i>. "
+      "Tells you how far the species deviates from ideal-dilute behaviour. "
+      "<code>0</code> means ideal (γ = 1). Negative values are typical for "
+      "charged species at non-negligible ionic strength. The magnitude "
+      "depends on charge and the activity model in use; see the "
+      "&ldquo;Information…&rdquo; dialog (next to the database selector) "
+      "for the model loaded.</p>"
+      "<hr>"
+      "<h3>Reading reactions in the Saturation indices / Phase assemblage "
+      "tables</h3>"
+      "<p>Mineral phases are written as <i>solid ⇌ aqueous products</i>, "
+      "so the renderer tags the LHS leader with <code>(s)</code> and "
+      "matching RHS species with <code>(aq)</code>. Gas phases get "
+      "<code>(g)</code>/<code>(aq)</code> instead. In the database "
+      "editor's Aqueous species tab, equations like "
+      "<code>Zn²⁺ ⇌ Zn²⁺</code> are master-species self-declarations — "
+      "both sides are the same aqueous species — and are rendered as "
+      "<code>Zn²⁺ (master species)</code>. They tell PHREEQC the canonical "
+      "name of the species for an element; you usually don't need to "
+      "touch them.</p>"
+      "<h3>Pseudo-elements: <code>Oxg</code>, <code>Ntg</code>, "
+      "<code>Mtg</code>, <code>Sg</code></h3>"
+      "<p>These are <b>not</b> separate chemical elements. They are "
+      "PHREEQC conventions for <i>redox-uncoupled</i> dissolved forms of "
+      "common gases:</p>"
+      "<ul>"
+      "<li><code>Oxg</code> → aqueous O₂ that does <b>not</b> equilibrate "
+      "with the O(-II)/O(0) couple of water. Use this when you want to "
+      "specify dissolved oxygen without forcing the whole solution into "
+      "redox equilibrium with it.</li>"
+      "<li><code>Ntg</code> → aqueous N₂ uncoupled from other nitrogen "
+      "redox states (NO₃⁻, NH₄⁺ …). Without it, low-pe waters would "
+      "collapse all N onto N₂ at equilibrium, which is rarely physical.</li>"
+      "<li><code>Mtg</code> → aqueous CH₄ uncoupled from other carbon "
+      "redox states. Same motivation: prevents forced redox equilibrium "
+      "between CH₄, CO₂, and dissolved organic species.</li>"
+      "<li><code>Sg</code> / <code>H2Sg</code> → aqueous H₂S uncoupled "
+      "from the S(-II)/S(VI) couple.</li>"
+      "</ul>"
+      "<p>The trailing <code>g</code> in the name is a PHREEQC tag, not a "
+      "physical-state marker — these species are dissolved in solution, "
+      "not gaseous.</p>"));
+  layout->addWidget(browser, 1);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  layout->addWidget(buttons);
+  dlg.exec();
 }
 
 void MainWindow::onDuplicateDatabase() {

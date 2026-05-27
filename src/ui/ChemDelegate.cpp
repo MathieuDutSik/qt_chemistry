@@ -94,7 +94,7 @@ struct Geom {
 qreal drawSpeciesGlyphs(QPainter* p, QPointF origin, const Geom& g,
                         const QColor& color,
                         const std::vector<Glyph>& glyphs,
-                        bool tagGas, bool tagAq) {
+                        bool tagGas, bool tagAq, bool tagSolid = false) {
   qreal x = origin.x();
   qreal pending_sub_x = -1, pending_sub_end = -1;
 
@@ -133,8 +133,11 @@ qreal drawSpeciesGlyphs(QPainter* p, QPointF origin, const Geom& g,
   }
   flushPending();
 
-  if (tagGas || tagAq) {
-    const QString state = tagGas ? QStringLiteral(" (g)") : QStringLiteral(" (aq)");
+  if (tagGas || tagAq || tagSolid) {
+    QString state;
+    if (tagGas)        state = QStringLiteral(" (g)");
+    else if (tagSolid) state = QStringLiteral(" (s)");
+    else               state = QStringLiteral(" (aq)");
     if (p) { p->setFont(g.italic);
              p->drawText(QPointF(x, g.baseline_y), state); }
     x += g.fm_italic.horizontalAdvance(state);
@@ -142,12 +145,52 @@ qreal drawSpeciesGlyphs(QPainter* p, QPointF origin, const Geom& g,
   return x - origin.x();
 }
 
+enum class PhaseKind { Aqueous, Solid, Gas };
+
+// Returns the trimmed left- and right-hand sides of an equation around
+// the first '=' sign. Either side may be empty.
+std::pair<std::string, std::string> splitEquation(const std::string& eq) {
+  const auto pos = eq.find('=');
+  if (pos == std::string::npos) return {eq, std::string{}};
+  auto trim = [](std::string s) {
+    size_t a = 0; while (a < s.size() &&
+        std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    size_t b = s.size(); while (b > a &&
+        std::isspace(static_cast<unsigned char>(s[b-1]))) --b;
+    return s.substr(a, b - a);
+  };
+  return {trim(eq.substr(0, pos)), trim(eq.substr(pos + 1))};
+}
+
 // Draws an equation. Returns total advance. If painter is nullptr, only
-// measures. For gas phases (`is_gas` true) annotates LHS leader (g) and
-// any RHS species matching the LHS body with (aq).
+// measures. State tagging:
+//   * PhaseKind::Gas — LHS leader tagged (g), matching RHS species (aq).
+//   * PhaseKind::Solid — LHS leader tagged (s), matching RHS species (aq).
+//   * PhaseKind::Aqueous — no tagging. If LHS == RHS literally, the row
+//     is rendered as "<species>  (master species)" to make it visually
+//     obvious that this is a master-species declaration, not an
+//     equilibrium between two states.
 qreal drawReactionImpl(QPainter* p, QPointF origin, const Geom& g,
                        const QColor& color, const std::string& equation,
-                       bool is_gas) {
+                       PhaseKind kind) {
+  // Master-species short-circuit for aqueous mode.
+  if (kind == PhaseKind::Aqueous) {
+    const auto sides = splitEquation(equation);
+    if (!sides.first.empty() && sides.first == sides.second) {
+      qreal x = origin.x();
+      if (p) p->setPen(color);
+      const auto glyphs = tokenizeSpecies(sides.first);
+      x += drawSpeciesGlyphs(p, QPointF(x, origin.y()), g, color,
+                              glyphs, false, false, false);
+      const QString tail = QStringLiteral("  (master species)");
+      if (p) { p->setFont(g.italic);
+               p->drawText(QPointF(x, g.baseline_y), tail); }
+      x += g.fm_italic.horizontalAdvance(tail);
+      return x - origin.x();
+    }
+  }
+  const bool is_gas   = (kind == PhaseKind::Gas);
+  const bool is_solid = (kind == PhaseKind::Solid);
   qreal x = origin.x();
   if (p) p->setPen(color);
 
@@ -187,10 +230,11 @@ qreal drawReactionImpl(QPainter* p, QPointF origin, const Geom& g,
       x += g.fm_base.horizontalAdvance(s);
     } else {
       const auto parts = splitSpecies(token);
-      bool tagGas = false, tagAq = false;
-      if (is_gas) {
+      bool tagGas = false, tagAq = false, tagSolid = false;
+      if (is_gas || is_solid) {
         if (!seen_equals && !lhs_first_done) {
-          tagGas = true;
+          if (is_gas) tagGas = true;
+          else        tagSolid = true;
           lhs_first_body = parts.body;
           lhs_first_done = true;
         } else if (seen_equals && parts.body == lhs_first_body) {
@@ -199,7 +243,7 @@ qreal drawReactionImpl(QPainter* p, QPointF origin, const Geom& g,
       }
       const auto glyphs = tokenizeSpecies(token);
       x += drawSpeciesGlyphs(p, QPointF(x, origin.y()), g, color,
-                              glyphs, tagGas, tagAq);
+                              glyphs, tagGas, tagAq, tagSolid);
     }
   }
   return x - origin.x();
@@ -239,9 +283,13 @@ void ChemDelegate::paint(QPainter* painter,
   } else {
     const std::string phase =
         index.data(kPhaseNameRole).toString().toStdString();
-    const bool is_gas = phase.size() >= 3 &&
-                        phase.substr(phase.size() - 3) == "(g)";
-    drawReactionImpl(painter, textRect.topLeft(), geom, color, s, is_gas);
+    PhaseKind kind = PhaseKind::Aqueous;
+    if (!phase.empty()) {
+      const bool is_gas = phase.size() >= 3 &&
+                          phase.substr(phase.size() - 3) == "(g)";
+      kind = is_gas ? PhaseKind::Gas : PhaseKind::Solid;
+    }
+    drawReactionImpl(painter, textRect.topLeft(), geom, color, s, kind);
   }
   painter->restore();
 }
@@ -260,9 +308,13 @@ QSize ChemDelegate::sizeHint(const QStyleOptionViewItem& option,
   } else {
     const std::string phase =
         index.data(kPhaseNameRole).toString().toStdString();
-    const bool is_gas = phase.size() >= 3 &&
-                        phase.substr(phase.size() - 3) == "(g)";
-    w = drawReactionImpl(nullptr, QPointF(0, 0), geom, QColor(), s, is_gas);
+    PhaseKind kind = PhaseKind::Aqueous;
+    if (!phase.empty()) {
+      const bool is_gas = phase.size() >= 3 &&
+                          phase.substr(phase.size() - 3) == "(g)";
+      kind = is_gas ? PhaseKind::Gas : PhaseKind::Solid;
+    }
+    w = drawReactionImpl(nullptr, QPointF(0, 0), geom, QColor(), s, kind);
   }
   return QSize(static_cast<int>(w) + 12,
                static_cast<int>(geom.totalHeight()) + 6);

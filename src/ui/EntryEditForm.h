@@ -12,12 +12,20 @@ class QDialogButtonBox;
 
 namespace qtchem {
 
-// Modal form for editing a single SOLUTION_SPECIES or PHASES entry.
-// Used for both Add and Edit; on accept(), entry() returns the new value.
+// Modal form for editing a single SOLUTION_SPECIES, PHASES, or
+// master-species entry. Used for both Add and Edit; on accept(), entry()
+// returns the new value.
+//
+// Three modes:
+//   * Kind::Phase    — phase name + reaction + properties
+//   * Kind::Aqueous  — reaction (derives name) + properties
+//   * Kind::Master   — single species name; reaction is auto-built as
+//                      "name = name" on accept. log K defaults to 0.
 class EntryEditForm : public QDialog {
   Q_OBJECT
  public:
-  EntryEditForm(EditableEntry initial, bool is_phase, QWidget* parent = nullptr);
+  enum class Kind { Phase, Aqueous, Master };
+  EntryEditForm(EditableEntry initial, Kind kind, QWidget* parent = nullptr);
 
   // Valid only after exec() == Accepted.
   const EditableEntry& entry() const { return entry_; }
@@ -26,7 +34,7 @@ class EntryEditForm : public QDialog {
   void onAccept();
 
  private:
-  bool is_phase_;
+  Kind kind_;
   EditableEntry entry_;
 
   QLineEdit* name_edit_ = nullptr;       // phases only (species name derived)

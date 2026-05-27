@@ -1,6 +1,7 @@
 #include "ui/DatabaseEditorDialog.h"
 
 #include "kernel/EditableDatabase.h"
+#include "ui/ChemDelegate.h"
 #include "ui/EntryEditForm.h"
 
 #include <QCheckBox>
@@ -35,6 +36,26 @@ QTableWidgetItem* numItem(double v, bool present, char fmt = 'g',
       present ? QString::number(v, fmt, prec) : QStringLiteral("—"));
   it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
   return it;
+}
+
+// Master-species detector: an aqueous entry whose reaction is a literal
+// self-declaration "X = X" (modulo whitespace). PHREEQC uses these to
+// attach activity-coefficient parameters to the master species; they are
+// not real reactions.
+bool isMasterEntry(const EditableEntry& e) {
+  const std::string& eq = e.equation;
+  const auto pos = eq.find('=');
+  if (pos == std::string::npos) return false;
+  auto trim = [](const std::string& s) {
+    size_t a = 0; while (a < s.size() &&
+        std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    size_t b = s.size(); while (b > a &&
+        std::isspace(static_cast<unsigned char>(s[b-1]))) --b;
+    return s.substr(a, b - a);
+  };
+  const std::string lhs = trim(eq.substr(0, pos));
+  const std::string rhs = trim(eq.substr(pos + 1));
+  return !lhs.empty() && lhs == rhs;
 }
 
 QTableWidget* buildEntryTable(const QStringList& headers) {
@@ -78,6 +99,8 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
                                        tr("log K"), tr("ΔH"), tr("ΔH unit"),
                                        tr("γ a₀"), tr("γ b"),
                                        tr("Analytic coeffs")});
+    aqueous_table_->setItemDelegateForColumn(
+        1, new ChemDelegate(ChemDelegate::Mode::Reaction, this));
     lay->addWidget(aqueous_table_, 1);
     auto* btns = new QHBoxLayout;
     aq_add_    = new QPushButton(tr("Add…"));
@@ -90,6 +113,35 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
     lay->addLayout(btns);
     tabs_->addTab(page, tr("Aqueous species"));
   }
+  // ----- Master species tab -----
+  {
+    auto* page = new QWidget;
+    auto* lay = new QVBoxLayout(page);
+    auto* hint = new QLabel(tr(
+        "<b>Master species</b> are the reference aqueous species for an "
+        "element (or its redox state) — e.g. <code>Zn²⁺</code> for zinc. "
+        "They appear in <code>SOLUTION_SPECIES</code> as "
+        "<code>X = X</code> self-declarations so PHREEQC can attach an "
+        "activity-coefficient form. They are not real reactions; the "
+        "<i>log K</i> is conventionally 0."));
+    hint->setTextFormat(Qt::RichText);
+    hint->setWordWrap(true);
+    hint->setStyleSheet(QStringLiteral("color:#555;"));
+    lay->addWidget(hint);
+    master_table_ = buildEntryTable({tr("Species"), tr("γ a₀"), tr("γ b"),
+                                      tr("Analytic coeffs")});
+    lay->addWidget(master_table_, 1);
+    auto* btns = new QHBoxLayout;
+    ms_add_    = new QPushButton(tr("Add…"));
+    ms_edit_   = new QPushButton(tr("Edit…"));
+    ms_remove_ = new QPushButton(tr("Remove"));
+    btns->addWidget(ms_add_);
+    btns->addWidget(ms_edit_);
+    btns->addWidget(ms_remove_);
+    btns->addStretch(1);
+    lay->addLayout(btns);
+    tabs_->addTab(page, tr("Master species"));
+  }
   // ----- Phases tab -----
   {
     auto* page = new QWidget;
@@ -97,6 +149,8 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
     phases_table_ = buildEntryTable({tr("Phase"), tr("Reaction"), tr("log K"),
                                       tr("ΔH"), tr("ΔH unit"),
                                       tr("Analytic coeffs")});
+    phases_table_->setItemDelegateForColumn(
+        1, new ChemDelegate(ChemDelegate::Mode::Reaction, this));
     lay->addWidget(phases_table_, 1);
     auto* btns = new QHBoxLayout;
     ph_add_    = new QPushButton(tr("Add…"));
@@ -176,6 +230,7 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
             .arg(QString::fromStdString(err)));
   } else {
     refreshAqueousTable();
+    refreshMasterTable();
     refreshPhasesTable();
     QString notice;
     if (db_->aqueousSectionCount() > 1 || db_->phaseSectionCount() > 1) {
@@ -193,6 +248,12 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
   connect(aq_remove_, &QPushButton::clicked, this, &DatabaseEditorDialog::onRemoveAqueous);
   connect(aqueous_table_, &QTableWidget::doubleClicked, this,
           &DatabaseEditorDialog::onEditAqueous);
+
+  connect(ms_add_,    &QPushButton::clicked, this, &DatabaseEditorDialog::onAddMaster);
+  connect(ms_edit_,   &QPushButton::clicked, this, &DatabaseEditorDialog::onEditMaster);
+  connect(ms_remove_, &QPushButton::clicked, this, &DatabaseEditorDialog::onRemoveMaster);
+  connect(master_table_, &QTableWidget::doubleClicked, this,
+          &DatabaseEditorDialog::onEditMaster);
 
   connect(ph_add_,    &QPushButton::clicked, this, &DatabaseEditorDialog::onAddPhase);
   connect(ph_edit_,   &QPushButton::clicked, this, &DatabaseEditorDialog::onEditPhase);
@@ -217,10 +278,14 @@ DatabaseEditorDialog::~DatabaseEditorDialog() {
 
 void DatabaseEditorDialog::setStructuredEnabled(bool on) {
   aqueous_table_->setEnabled(on);
+  master_table_->setEnabled(on);
   phases_table_->setEnabled(on);
   aq_add_->setEnabled(on);
   aq_edit_->setEnabled(on);
   aq_remove_->setEnabled(on);
+  ms_add_->setEnabled(on);
+  ms_edit_->setEnabled(on);
+  ms_remove_->setEnabled(on);
   ph_add_->setEnabled(on);
   ph_edit_->setEnabled(on);
   ph_remove_->setEnabled(on);
@@ -251,28 +316,55 @@ void DatabaseEditorDialog::closeEvent(QCloseEvent* e) {
 void DatabaseEditorDialog::refreshAqueousTable() {
   const QSignalBlocker b(aqueous_table_);
   aqueous_table_->setSortingEnabled(false);
+  aqueous_row_to_index_.clear();
   const auto& list = db_->aqueousSpecies();
-  aqueous_table_->setRowCount(static_cast<int>(list.size()));
-  for (size_t i = 0; i < list.size(); ++i) {
-    const auto& e = list[i];
-    aqueous_table_->setItem(i, 0, textItem(QString::fromStdString(e.name)));
-    aqueous_table_->setItem(i, 1, textItem(QString::fromStdString(e.equation)));
-    aqueous_table_->setItem(i, 2, numItem(e.log_k, e.has_log_k, 'f', 3));
-    aqueous_table_->setItem(i, 3, numItem(e.delta_h, e.has_delta_h, 'f', 3));
-    aqueous_table_->setItem(i, 4, textItem(
+  for (size_t i = 0; i < list.size(); ++i)
+    if (!isMasterEntry(list[i])) aqueous_row_to_index_.push_back(i);
+  aqueous_table_->setRowCount(static_cast<int>(aqueous_row_to_index_.size()));
+  for (size_t row = 0; row < aqueous_row_to_index_.size(); ++row) {
+    const auto& e = list[aqueous_row_to_index_[row]];
+    aqueous_table_->setItem(row, 0, textItem(QString::fromStdString(e.name)));
+    aqueous_table_->setItem(row, 1, textItem(QString::fromStdString(e.equation)));
+    aqueous_table_->setItem(row, 2, numItem(e.log_k, e.has_log_k, 'f', 3));
+    aqueous_table_->setItem(row, 3, numItem(e.delta_h, e.has_delta_h, 'f', 3));
+    aqueous_table_->setItem(row, 4, textItem(
         e.has_delta_h ? QString::fromStdString(e.delta_h_unit)
                       : QStringLiteral("—")));
-    aqueous_table_->setItem(i, 5,
+    aqueous_table_->setItem(row, 5,
         numItem(e.gamma_a0, e.has_gamma, 'f', 3));
-    aqueous_table_->setItem(i, 6,
+    aqueous_table_->setItem(row, 6,
         numItem(e.gamma_b,  e.has_gamma, 'f', 3));
-    aqueous_table_->setItem(i, 7, textItem(
+    aqueous_table_->setItem(row, 7, textItem(
         e.analytic_coeffs.empty()
             ? QStringLiteral("—")
             : tr("%1 values").arg(e.analytic_coeffs.size())));
   }
   aqueous_table_->setSortingEnabled(true);
   aqueous_table_->resizeColumnsToContents();
+}
+
+void DatabaseEditorDialog::refreshMasterTable() {
+  const QSignalBlocker b(master_table_);
+  master_table_->setSortingEnabled(false);
+  master_row_to_index_.clear();
+  const auto& list = db_->aqueousSpecies();
+  for (size_t i = 0; i < list.size(); ++i)
+    if (isMasterEntry(list[i])) master_row_to_index_.push_back(i);
+  master_table_->setRowCount(static_cast<int>(master_row_to_index_.size()));
+  for (size_t row = 0; row < master_row_to_index_.size(); ++row) {
+    const auto& e = list[master_row_to_index_[row]];
+    master_table_->setItem(row, 0, textItem(QString::fromStdString(e.name)));
+    master_table_->setItem(row, 1,
+        numItem(e.gamma_a0, e.has_gamma, 'f', 3));
+    master_table_->setItem(row, 2,
+        numItem(e.gamma_b,  e.has_gamma, 'f', 3));
+    master_table_->setItem(row, 3, textItem(
+        e.analytic_coeffs.empty()
+            ? QStringLiteral("—")
+            : tr("%1 values").arg(e.analytic_coeffs.size())));
+  }
+  master_table_->setSortingEnabled(true);
+  master_table_->resizeColumnsToContents();
 }
 
 void DatabaseEditorDialog::refreshPhasesTable() {
@@ -283,7 +375,10 @@ void DatabaseEditorDialog::refreshPhasesTable() {
   for (size_t i = 0; i < list.size(); ++i) {
     const auto& e = list[i];
     phases_table_->setItem(i, 0, textItem(QString::fromStdString(e.name)));
-    phases_table_->setItem(i, 1, textItem(QString::fromStdString(e.equation)));
+    auto* rxn = textItem(QString::fromStdString(e.equation));
+    rxn->setData(ChemDelegate::kPhaseNameRole,
+                 QString::fromStdString(e.name));
+    phases_table_->setItem(i, 1, rxn);
     phases_table_->setItem(i, 2, numItem(e.log_k, e.has_log_k, 'f', 3));
     phases_table_->setItem(i, 3, numItem(e.delta_h, e.has_delta_h, 'f', 3));
     phases_table_->setItem(i, 4, textItem(
@@ -340,56 +435,113 @@ void DatabaseEditorDialog::onRawReparse() {
   status_label_->setText(tr("Structured view rebuilt from raw text."));
 }
 
+namespace {
+
+// Map a current-row from a partitioned table to a model index in
+// aqueousSpecies(), going via the species name in column 0 to survive
+// sorting. The fallback `row_to_index` mapping (built at refresh time) is
+// only valid before the user sorts; we use the name path for robustness.
+size_t modelIndexFor(QTableWidget* table, int row,
+                     const std::vector<EditableEntry>& list,
+                     bool want_master) {
+  if (row < 0 || !table->item(row, 0)) return list.size();
+  const QString name = table->item(row, 0)->text();
+  for (size_t i = 0; i < list.size(); ++i) {
+    if (QString::fromStdString(list[i].name) != name) continue;
+    if (isMasterEntry(list[i]) != want_master) continue;
+    return i;
+  }
+  return list.size();
+}
+
+}  // namespace
+
 void DatabaseEditorDialog::onAddAqueous() {
-  EntryEditForm form(EditableEntry{}, /*is_phase=*/false, this);
+  EntryEditForm form(EditableEntry{}, EntryEditForm::Kind::Aqueous, this);
   if (form.exec() != QDialog::Accepted) return;
   db_->appendAqueous(form.entry());
   refreshAqueousTable();
+  refreshMasterTable();
   refreshRawFromStructured();
   markDirty();
 }
 
 void DatabaseEditorDialog::onEditAqueous() {
   const int row = aqueous_table_->currentRow();
-  if (row < 0) return;
-  // currentRow() is the view row after sorting; map to model index via
-  // the species name (unique).
-  const QString name = aqueous_table_->item(row, 0)->text();
   const auto& list = db_->aqueousSpecies();
-  size_t idx = list.size();
-  for (size_t i = 0; i < list.size(); ++i)
-    if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
+  const size_t idx = modelIndexFor(aqueous_table_, row, list, /*master=*/false);
   if (idx == list.size()) return;
-
-  EntryEditForm form(list[idx], /*is_phase=*/false, this);
+  EntryEditForm form(list[idx], EntryEditForm::Kind::Aqueous, this);
   if (form.exec() != QDialog::Accepted) return;
   db_->replaceAqueous(idx, form.entry());
   refreshAqueousTable();
+  refreshMasterTable();
   refreshRawFromStructured();
   markDirty();
 }
 
 void DatabaseEditorDialog::onRemoveAqueous() {
   const int row = aqueous_table_->currentRow();
-  if (row < 0) return;
-  const QString name = aqueous_table_->item(row, 0)->text();
   const auto& list = db_->aqueousSpecies();
-  size_t idx = list.size();
-  for (size_t i = 0; i < list.size(); ++i)
-    if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
+  const size_t idx = modelIndexFor(aqueous_table_, row, list, /*master=*/false);
   if (idx == list.size()) return;
+  const QString name = QString::fromStdString(list[idx].name);
   const auto ans = QMessageBox::question(this, tr("Remove species?"),
       tr("Remove aqueous species '%1'? This cannot be undone until "
          "you cancel the dialog without saving.").arg(name));
   if (ans != QMessageBox::Yes) return;
   db_->removeAqueous(idx);
   refreshAqueousTable();
+  refreshMasterTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onAddMaster() {
+  EntryEditForm form(EditableEntry{}, EntryEditForm::Kind::Master, this);
+  if (form.exec() != QDialog::Accepted) return;
+  db_->appendAqueous(form.entry());
+  refreshAqueousTable();
+  refreshMasterTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onEditMaster() {
+  const int row = master_table_->currentRow();
+  const auto& list = db_->aqueousSpecies();
+  const size_t idx = modelIndexFor(master_table_, row, list, /*master=*/true);
+  if (idx == list.size()) return;
+  EntryEditForm form(list[idx], EntryEditForm::Kind::Master, this);
+  if (form.exec() != QDialog::Accepted) return;
+  db_->replaceAqueous(idx, form.entry());
+  refreshAqueousTable();
+  refreshMasterTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onRemoveMaster() {
+  const int row = master_table_->currentRow();
+  const auto& list = db_->aqueousSpecies();
+  const size_t idx = modelIndexFor(master_table_, row, list, /*master=*/true);
+  if (idx == list.size()) return;
+  const QString name = QString::fromStdString(list[idx].name);
+  const auto ans = QMessageBox::question(this, tr("Remove master species?"),
+      tr("Remove master species '%1'? This may break references from "
+         "SOLUTION_MASTER_SPECIES and from derived species — use with "
+         "care. Cannot be undone until you cancel without saving.")
+          .arg(name));
+  if (ans != QMessageBox::Yes) return;
+  db_->removeAqueous(idx);
+  refreshAqueousTable();
+  refreshMasterTable();
   refreshRawFromStructured();
   markDirty();
 }
 
 void DatabaseEditorDialog::onAddPhase() {
-  EntryEditForm form(EditableEntry{}, /*is_phase=*/true, this);
+  EntryEditForm form(EditableEntry{}, EntryEditForm::Kind::Phase, this);
   if (form.exec() != QDialog::Accepted) return;
   db_->appendPhase(form.entry());
   refreshPhasesTable();
@@ -407,7 +559,7 @@ void DatabaseEditorDialog::onEditPhase() {
     if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
   if (idx == list.size()) return;
 
-  EntryEditForm form(list[idx], /*is_phase=*/true, this);
+  EntryEditForm form(list[idx], EntryEditForm::Kind::Phase, this);
   if (form.exec() != QDialog::Accepted) return;
   db_->replacePhase(idx, form.entry());
   refreshPhasesTable();
