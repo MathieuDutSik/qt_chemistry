@@ -8,7 +8,9 @@ qt_add_library(qtchem_ui STATIC
   ChemDelegate.h
   ChemDelegate.cpp
   DatabaseEditorDialog.h
-  DatabaseEditorDialog.cpp)
+  DatabaseEditorDialog.cpp
+  EntryEditForm.h
+  EntryEditForm.cpp)
 
 target_include_directories(qtchem_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 

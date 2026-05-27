@@ -1,47 +1,148 @@
 #include "ui/DatabaseEditorDialog.h"
 
 #include "kernel/EditableDatabase.h"
+#include "ui/EntryEditForm.h"
 
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QVBoxLayout>
 
 namespace qtchem {
+
+namespace {
+
+QTableWidgetItem* textItem(const QString& s) {
+  auto* it = new QTableWidgetItem(s);
+  return it;
+}
+
+QTableWidgetItem* numItem(double v, bool present, char fmt = 'g',
+                          int prec = 4) {
+  auto* it = new QTableWidgetItem(
+      present ? QString::number(v, fmt, prec) : QStringLiteral("—"));
+  it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  return it;
+}
+
+QTableWidget* buildEntryTable(const QStringList& headers) {
+  auto* t = new QTableWidget(0, headers.size());
+  t->setHorizontalHeaderLabels(headers);
+  t->horizontalHeader()->setStretchLastSection(true);
+  t->verticalHeader()->setVisible(false);
+  t->setSelectionBehavior(QAbstractItemView::SelectRows);
+  t->setSelectionMode(QAbstractItemView::SingleSelection);
+  t->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  t->setAlternatingRowColors(true);
+  t->setSortingEnabled(true);
+  return t;
+}
+
+}  // namespace
 
 DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
                                            QWidget* parent)
     : QDialog(parent), file_path_(filePath), db_(new EditableDatabase) {
   setWindowTitle(tr("Edit database — %1").arg(QFileInfo(filePath).fileName()));
-  resize(900, 700);
+  resize(1100, 760);
 
-  auto* layout = new QVBoxLayout(this);
+  auto* outer = new QVBoxLayout(this);
 
   auto* header = new QLabel(
       tr("Editing user database: <code>%1</code>")
           .arg(QDir::toNativeSeparators(filePath).toHtmlEscaped()));
   header->setTextFormat(Qt::RichText);
   header->setStyleSheet(QStringLiteral("color:#444;"));
-  layout->addWidget(header);
+  outer->addWidget(header);
 
-  editor_ = new QPlainTextEdit;
-  editor_->setLineWrapMode(QPlainTextEdit::NoWrap);
-  editor_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-  editor_->setTabStopDistance(4 * editor_->fontMetrics().horizontalAdvance(
-                                      QLatin1Char(' ')));
-  layout->addWidget(editor_, 1);
+  tabs_ = new QTabWidget;
+  outer->addWidget(tabs_, 1);
+
+  // ----- Aqueous species tab -----
+  {
+    auto* page = new QWidget;
+    auto* lay = new QVBoxLayout(page);
+    aqueous_table_ = buildEntryTable({tr("Species"), tr("Reaction"),
+                                       tr("log K"), tr("ΔH"), tr("ΔH unit"),
+                                       tr("γ a₀"), tr("γ b"),
+                                       tr("Analytic coeffs")});
+    lay->addWidget(aqueous_table_, 1);
+    auto* btns = new QHBoxLayout;
+    aq_add_    = new QPushButton(tr("Add…"));
+    aq_edit_   = new QPushButton(tr("Edit…"));
+    aq_remove_ = new QPushButton(tr("Remove"));
+    btns->addWidget(aq_add_);
+    btns->addWidget(aq_edit_);
+    btns->addWidget(aq_remove_);
+    btns->addStretch(1);
+    lay->addLayout(btns);
+    tabs_->addTab(page, tr("Aqueous species"));
+  }
+  // ----- Phases tab -----
+  {
+    auto* page = new QWidget;
+    auto* lay = new QVBoxLayout(page);
+    phases_table_ = buildEntryTable({tr("Phase"), tr("Reaction"), tr("log K"),
+                                      tr("ΔH"), tr("ΔH unit"),
+                                      tr("Analytic coeffs")});
+    lay->addWidget(phases_table_, 1);
+    auto* btns = new QHBoxLayout;
+    ph_add_    = new QPushButton(tr("Add…"));
+    ph_edit_   = new QPushButton(tr("Edit…"));
+    ph_remove_ = new QPushButton(tr("Remove"));
+    btns->addWidget(ph_add_);
+    btns->addWidget(ph_edit_);
+    btns->addWidget(ph_remove_);
+    btns->addStretch(1);
+    lay->addLayout(btns);
+    tabs_->addTab(page, tr("Phases"));
+  }
+  // ----- Raw text tab -----
+  {
+    auto* page = new QWidget;
+    auto* lay = new QVBoxLayout(page);
+    auto* row = new QHBoxLayout;
+    raw_enable_box_ = new QCheckBox(tr("Enable raw editing"));
+    raw_enable_box_->setToolTip(tr(
+        "Allow free-form edits in this tab. While enabled, the structured "
+        "tabs are read-only — they go stale because raw edits may add, "
+        "reorder, or remove sections beyond what the structured model "
+        "understands. Click 'Re-parse from raw' to rebuild the structured "
+        "view from the current text."));
+    raw_reparse_btn_ = new QPushButton(tr("Re-parse from raw"));
+    raw_reparse_btn_->setEnabled(false);
+    row->addWidget(raw_enable_box_);
+    row->addWidget(raw_reparse_btn_);
+    row->addStretch(1);
+    lay->addLayout(row);
+
+    raw_editor_ = new QPlainTextEdit;
+    raw_editor_->setReadOnly(true);
+    raw_editor_->setLineWrapMode(QPlainTextEdit::NoWrap);
+    raw_editor_->setFont(
+        QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    raw_editor_->setTabStopDistance(
+        4 * raw_editor_->fontMetrics().horizontalAdvance(QLatin1Char(' ')));
+    lay->addWidget(raw_editor_, 1);
+    tabs_->addTab(page, tr("Raw text"));
+  }
 
   status_label_ = new QLabel;
   status_label_->setWordWrap(true);
   status_label_->setStyleSheet(QStringLiteral("color:#888;"));
-  layout->addWidget(status_label_);
+  outer->addWidget(status_label_);
 
   auto* buttons = new QDialogButtonBox(
       QDialogButtonBox::Save | QDialogButtonBox::Cancel);
@@ -50,8 +151,9 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
   connect(buttons, &QDialogButtonBox::accepted, this,
           &DatabaseEditorDialog::onSave);
   connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-  layout->addWidget(buttons);
+  outer->addWidget(buttons);
 
+  // Load the file.
   std::string err;
   if (!db_->load(filePath.toStdString(), &err)) {
     QMessageBox::critical(this, tr("Cannot open database"),
@@ -59,20 +161,72 @@ DatabaseEditorDialog::DatabaseEditorDialog(const QString& filePath,
     QMetaObject::invokeMethod(this, &QDialog::reject, Qt::QueuedConnection);
     return;
   }
-  editor_->setPlainText(QString::fromStdString(db_->text()));
-  dirty_ = false;
-  status_label_->setText(
-      tr("Edits are validated by PHREEQC on Save; you cannot save a file "
-         "that PHREEQC cannot load."));
-  connect(editor_, &QPlainTextEdit::textChanged, this,
-          &DatabaseEditorDialog::onTextChanged);
+  raw_editor_->setPlainText(QString::fromStdString(db_->text()));
+
+  // Try to parse into the structured model. If it fails, force raw mode.
+  if (!db_->reparse(&err)) {
+    raw_enable_box_->setChecked(true);
+    raw_enable_box_->setEnabled(false);
+    setStructuredEnabled(false);
+    source_ = AuthoritativeSource::Raw;
+    raw_editor_->setReadOnly(false);
+    status_label_->setText(
+        tr("Structured editing unavailable for this file: %1 "
+           "Raw editing only; changes are validated on Save.")
+            .arg(QString::fromStdString(err)));
+  } else {
+    refreshAqueousTable();
+    refreshPhasesTable();
+    QString notice;
+    if (db_->aqueousSectionCount() > 1 || db_->phaseSectionCount() > 1) {
+      notice = tr("Note: this database has multiple SOLUTION_SPECIES or "
+                  "PHASES sections; on Save they are merged into the first "
+                  "occurrence of each. ");
+    }
+    status_label_->setText(
+        notice + tr("Edits are validated by PHREEQC on Save; you cannot save "
+                    "a file that PHREEQC cannot load."));
+  }
+
+  connect(aq_add_,    &QPushButton::clicked, this, &DatabaseEditorDialog::onAddAqueous);
+  connect(aq_edit_,   &QPushButton::clicked, this, &DatabaseEditorDialog::onEditAqueous);
+  connect(aq_remove_, &QPushButton::clicked, this, &DatabaseEditorDialog::onRemoveAqueous);
+  connect(aqueous_table_, &QTableWidget::doubleClicked, this,
+          &DatabaseEditorDialog::onEditAqueous);
+
+  connect(ph_add_,    &QPushButton::clicked, this, &DatabaseEditorDialog::onAddPhase);
+  connect(ph_edit_,   &QPushButton::clicked, this, &DatabaseEditorDialog::onEditPhase);
+  connect(ph_remove_, &QPushButton::clicked, this, &DatabaseEditorDialog::onRemovePhase);
+  connect(phases_table_, &QTableWidget::doubleClicked, this,
+          &DatabaseEditorDialog::onEditPhase);
+
+  connect(raw_enable_box_, &QCheckBox::toggled, this,
+          &DatabaseEditorDialog::onRawToggle);
+  connect(raw_reparse_btn_, &QPushButton::clicked, this,
+          &DatabaseEditorDialog::onRawReparse);
+  connect(raw_editor_, &QPlainTextEdit::textChanged, this, [this]() {
+    if (raw_editor_->isReadOnly()) return;
+    source_ = AuthoritativeSource::Raw;
+    markDirty();
+  });
 }
 
 DatabaseEditorDialog::~DatabaseEditorDialog() {
   delete db_;
 }
 
-void DatabaseEditorDialog::onTextChanged() {
+void DatabaseEditorDialog::setStructuredEnabled(bool on) {
+  aqueous_table_->setEnabled(on);
+  phases_table_->setEnabled(on);
+  aq_add_->setEnabled(on);
+  aq_edit_->setEnabled(on);
+  aq_remove_->setEnabled(on);
+  ph_add_->setEnabled(on);
+  ph_edit_->setEnabled(on);
+  ph_remove_->setEnabled(on);
+}
+
+void DatabaseEditorDialog::markDirty() {
   if (!dirty_) {
     dirty_ = true;
     save_btn_->setEnabled(true);
@@ -94,8 +248,198 @@ void DatabaseEditorDialog::closeEvent(QCloseEvent* e) {
   else                  e->ignore();
 }
 
+void DatabaseEditorDialog::refreshAqueousTable() {
+  const QSignalBlocker b(aqueous_table_);
+  aqueous_table_->setSortingEnabled(false);
+  const auto& list = db_->aqueousSpecies();
+  aqueous_table_->setRowCount(static_cast<int>(list.size()));
+  for (size_t i = 0; i < list.size(); ++i) {
+    const auto& e = list[i];
+    aqueous_table_->setItem(i, 0, textItem(QString::fromStdString(e.name)));
+    aqueous_table_->setItem(i, 1, textItem(QString::fromStdString(e.equation)));
+    aqueous_table_->setItem(i, 2, numItem(e.log_k, e.has_log_k, 'f', 3));
+    aqueous_table_->setItem(i, 3, numItem(e.delta_h, e.has_delta_h, 'f', 3));
+    aqueous_table_->setItem(i, 4, textItem(
+        e.has_delta_h ? QString::fromStdString(e.delta_h_unit)
+                      : QStringLiteral("—")));
+    aqueous_table_->setItem(i, 5,
+        numItem(e.gamma_a0, e.has_gamma, 'f', 3));
+    aqueous_table_->setItem(i, 6,
+        numItem(e.gamma_b,  e.has_gamma, 'f', 3));
+    aqueous_table_->setItem(i, 7, textItem(
+        e.analytic_coeffs.empty()
+            ? QStringLiteral("—")
+            : tr("%1 values").arg(e.analytic_coeffs.size())));
+  }
+  aqueous_table_->setSortingEnabled(true);
+  aqueous_table_->resizeColumnsToContents();
+}
+
+void DatabaseEditorDialog::refreshPhasesTable() {
+  const QSignalBlocker b(phases_table_);
+  phases_table_->setSortingEnabled(false);
+  const auto& list = db_->phases();
+  phases_table_->setRowCount(static_cast<int>(list.size()));
+  for (size_t i = 0; i < list.size(); ++i) {
+    const auto& e = list[i];
+    phases_table_->setItem(i, 0, textItem(QString::fromStdString(e.name)));
+    phases_table_->setItem(i, 1, textItem(QString::fromStdString(e.equation)));
+    phases_table_->setItem(i, 2, numItem(e.log_k, e.has_log_k, 'f', 3));
+    phases_table_->setItem(i, 3, numItem(e.delta_h, e.has_delta_h, 'f', 3));
+    phases_table_->setItem(i, 4, textItem(
+        e.has_delta_h ? QString::fromStdString(e.delta_h_unit)
+                      : QStringLiteral("—")));
+    phases_table_->setItem(i, 5, textItem(
+        e.analytic_coeffs.empty()
+            ? QStringLiteral("—")
+            : tr("%1 values").arg(e.analytic_coeffs.size())));
+  }
+  phases_table_->setSortingEnabled(true);
+  phases_table_->resizeColumnsToContents();
+}
+
+void DatabaseEditorDialog::refreshRawFromStructured() {
+  db_->reserialize();
+  const QSignalBlocker b(raw_editor_);
+  raw_editor_->setPlainText(QString::fromStdString(db_->text()));
+}
+
+void DatabaseEditorDialog::onRawToggle(bool on) {
+  if (on && source_ == AuthoritativeSource::Structured) {
+    // We're flipping FROM structured TO raw. Make sure raw text reflects
+    // the latest structured state, then disable structured tabs.
+    refreshRawFromStructured();
+    raw_editor_->setReadOnly(false);
+    raw_reparse_btn_->setEnabled(true);
+    setStructuredEnabled(false);
+    status_label_->setText(
+        tr("Raw editing enabled. Structured tabs are disabled until "
+           "you press 'Re-parse from raw'."));
+  } else if (!on) {
+    raw_editor_->setReadOnly(true);
+    raw_reparse_btn_->setEnabled(false);
+    // We do NOT automatically reparse — the user must explicitly press
+    // the button if they want to rebuild the structured view.
+  }
+}
+
+void DatabaseEditorDialog::onRawReparse() {
+  db_->setText(raw_editor_->toPlainText().toStdString());
+  std::string err;
+  if (!db_->reparse(&err)) {
+    QMessageBox::warning(this, tr("Cannot re-parse"),
+        tr("The current text could not be parsed into the structured "
+           "model: %1").arg(QString::fromStdString(err)));
+    return;
+  }
+  refreshAqueousTable();
+  refreshPhasesTable();
+  setStructuredEnabled(true);
+  source_ = AuthoritativeSource::Structured;
+  raw_enable_box_->setChecked(false);  // also re-enables read-only mode.
+  status_label_->setText(tr("Structured view rebuilt from raw text."));
+}
+
+void DatabaseEditorDialog::onAddAqueous() {
+  EntryEditForm form(EditableEntry{}, /*is_phase=*/false, this);
+  if (form.exec() != QDialog::Accepted) return;
+  db_->appendAqueous(form.entry());
+  refreshAqueousTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onEditAqueous() {
+  const int row = aqueous_table_->currentRow();
+  if (row < 0) return;
+  // currentRow() is the view row after sorting; map to model index via
+  // the species name (unique).
+  const QString name = aqueous_table_->item(row, 0)->text();
+  const auto& list = db_->aqueousSpecies();
+  size_t idx = list.size();
+  for (size_t i = 0; i < list.size(); ++i)
+    if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
+  if (idx == list.size()) return;
+
+  EntryEditForm form(list[idx], /*is_phase=*/false, this);
+  if (form.exec() != QDialog::Accepted) return;
+  db_->replaceAqueous(idx, form.entry());
+  refreshAqueousTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onRemoveAqueous() {
+  const int row = aqueous_table_->currentRow();
+  if (row < 0) return;
+  const QString name = aqueous_table_->item(row, 0)->text();
+  const auto& list = db_->aqueousSpecies();
+  size_t idx = list.size();
+  for (size_t i = 0; i < list.size(); ++i)
+    if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
+  if (idx == list.size()) return;
+  const auto ans = QMessageBox::question(this, tr("Remove species?"),
+      tr("Remove aqueous species '%1'? This cannot be undone until "
+         "you cancel the dialog without saving.").arg(name));
+  if (ans != QMessageBox::Yes) return;
+  db_->removeAqueous(idx);
+  refreshAqueousTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onAddPhase() {
+  EntryEditForm form(EditableEntry{}, /*is_phase=*/true, this);
+  if (form.exec() != QDialog::Accepted) return;
+  db_->appendPhase(form.entry());
+  refreshPhasesTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onEditPhase() {
+  const int row = phases_table_->currentRow();
+  if (row < 0) return;
+  const QString name = phases_table_->item(row, 0)->text();
+  const auto& list = db_->phases();
+  size_t idx = list.size();
+  for (size_t i = 0; i < list.size(); ++i)
+    if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
+  if (idx == list.size()) return;
+
+  EntryEditForm form(list[idx], /*is_phase=*/true, this);
+  if (form.exec() != QDialog::Accepted) return;
+  db_->replacePhase(idx, form.entry());
+  refreshPhasesTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
+void DatabaseEditorDialog::onRemovePhase() {
+  const int row = phases_table_->currentRow();
+  if (row < 0) return;
+  const QString name = phases_table_->item(row, 0)->text();
+  const auto& list = db_->phases();
+  size_t idx = list.size();
+  for (size_t i = 0; i < list.size(); ++i)
+    if (QString::fromStdString(list[i].name) == name) { idx = i; break; }
+  if (idx == list.size()) return;
+  const auto ans = QMessageBox::question(this, tr("Remove phase?"),
+      tr("Remove phase '%1'? This cannot be undone until you cancel "
+         "the dialog without saving.").arg(name));
+  if (ans != QMessageBox::Yes) return;
+  db_->removePhase(idx);
+  refreshPhasesTable();
+  refreshRawFromStructured();
+  markDirty();
+}
+
 void DatabaseEditorDialog::onSave() {
-  db_->setText(editor_->toPlainText().toStdString());
+  if (source_ == AuthoritativeSource::Raw) {
+    db_->setText(raw_editor_->toPlainText().toStdString());
+  } else {
+    db_->reserialize();
+  }
   std::string err;
   if (!db_->validate(&err)) {
     auto* msg = new QMessageBox(QMessageBox::Warning,
