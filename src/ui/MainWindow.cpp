@@ -46,16 +46,26 @@ void setHeaders(QTableWidget* t, const QStringList& h) {
   t->setAlternatingRowColors(true);
 }
 
+class NumericItem : public QTableWidgetItem {
+ public:
+  NumericItem(double v, const QString& text) : QTableWidgetItem(text), value_(v) {
+    setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  }
+  bool operator<(const QTableWidgetItem& other) const override {
+    if (auto* o = dynamic_cast<const NumericItem*>(&other))
+      return value_ < o->value_;
+    return QTableWidgetItem::operator<(other);
+  }
+ private:
+  double value_;
+};
+
 QTableWidgetItem* numItem(double v, char fmt = 'g', int prec = 4) {
-  auto* it = new QTableWidgetItem(QString::number(v, fmt, prec));
-  it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  return it;
+  return new NumericItem(v, QString::number(v, fmt, prec));
 }
 
 QTableWidgetItem* sciItem(double v) {
-  auto* it = new QTableWidgetItem(QString::number(v, 'e', 3));
-  it->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  return it;
+  return new NumericItem(v, QString::number(v, 'e', 3));
 }
 
 QTableWidgetItem* textItem(const QString& s) {
@@ -103,6 +113,26 @@ MainWindow::MainWindow(QWidget* parent)
                               tr("log m"), tr("log a"), tr("log γ")});
   species_table_->setItemDelegateForColumn(
       2, new ChemDelegate(ChemDelegate::Mode::Species, this));
+  species_table_->setSortingEnabled(true);
+  species_table_->horizontalHeader()->setSortIndicatorShown(true);
+  species_table_->horizontalHeader()->setSortIndicator(0, Qt::AscendingOrder);
+  const QStringList speciesHeaderTips = {
+      tr("Master element associated with this aqueous species."),
+      tr("Aqueous species as written in the PHREEQC database."),
+      tr("Typeset species name (subscripts and superscripts)."),
+      tr("Molality m: moles of species per kg of water (mol/kgw)."),
+      tr("Activity a = γ·m: the thermodynamically effective concentration "
+         "(dimensionless, ref. state 1 mol/kgw)."),
+      tr("log₁₀(m): base-10 logarithm of molality."),
+      tr("log₁₀(a): base-10 logarithm of activity. Drives the equilibrium "
+         "(this is what appears in mass-action expressions)."),
+      tr("log₁₀(γ): base-10 logarithm of the activity coefficient. "
+         "γ = 1 in ideal/infinitely-dilute solutions; deviation from 0 "
+         "reflects non-ideality from the chosen activity model.")};
+  for (int c = 0; c < speciesHeaderTips.size(); ++c) {
+    if (auto* h = species_table_->horizontalHeaderItem(c))
+      h->setToolTip(speciesHeaderTips[c]);
+  }
   result_tabs_->addTab(species_table_, tr("Species"));
 
   si_table_ = new QTableWidget(0, 6);
@@ -322,6 +352,8 @@ void MainWindow::renderResults(const ParsedOutput& po) {
   }
 
   // ----- Species (final state) -----
+  const bool prev_sort = species_table_->isSortingEnabled();
+  species_table_->setSortingEnabled(false);
   species_table_->setRowCount(final.species.size());
   for (size_t i = 0; i < final.species.size(); ++i) {
     const auto& s = final.species[i];
@@ -345,6 +377,7 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     species_table_->setItem(i, 6, numItem(s.log_activity, 'f', 3));
     species_table_->setItem(i, 7, numItem(s.log_gamma, 'f', 3));
   }
+  species_table_->setSortingEnabled(prev_sort);
 
   // For Reaction columns the cell text is the raw PHREEQC equation
   // ("CaCO3 = CO3-2 + Ca+2"); ChemDelegate renders it. The phase name is
