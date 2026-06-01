@@ -9,3 +9,7 @@ target_link_libraries(editable_database_test PRIVATE qtchem_kernel)
 target_compile_definitions(editable_database_test PRIVATE
   QTCHEM_TEST_DATABASE_DIR="${QTCHEM_IPHREEQC_DATABASE_DIR}")
 add_test(NAME editable_database_test COMMAND editable_database_test)
+
+add_executable(unit_convert_test unit_convert_test.cpp)
+target_link_libraries(unit_convert_test PRIVATE qtchem_kernel)
+add_test(NAME unit_convert_test COMMAND unit_convert_test)

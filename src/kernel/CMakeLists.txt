@@ -10,7 +10,9 @@ add_library(qtchem_kernel STATIC
   EditableDatabase.h
   EditableDatabase.cpp
   ChemFormat.h
-  ChemFormat.cpp)
+  ChemFormat.cpp
+  UnitConvert.h
+  UnitConvert.cpp)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core)
 target_link_libraries(qtchem_kernel PUBLIC Qt6::Core)
