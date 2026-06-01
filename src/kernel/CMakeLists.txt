@@ -12,7 +12,9 @@ add_library(qtchem_kernel STATIC
   ChemFormat.h
   ChemFormat.cpp
   UnitConvert.h
-  UnitConvert.cpp)
+  UnitConvert.cpp
+  WaterDensity.h
+  WaterDensity.cpp)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core)
 target_link_libraries(qtchem_kernel PUBLIC Qt6::Core)

@@ -1,6 +1,7 @@
 #include "ui/SolutionPanel.h"
 
 #include "kernel/DatabaseInfo.h"
+#include "ui/UnitDelegate.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -92,6 +93,7 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   hh->setSectionResizeMode(kColElement, QHeaderView::ResizeToContents);
   hh->setSectionResizeMode(kColMaster,  QHeaderView::ResizeToContents);
   table_->verticalHeader()->setVisible(false);
+  table_->setItemDelegateForColumn(kColUnits, new UnitDelegate(this));
   root->addWidget(table_, 1);
 
   auto* btns = new QHBoxLayout;

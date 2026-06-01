@@ -52,6 +52,21 @@ std::string EquilibriumProblem::toPhreeqcInput(const DatabaseInfo* db) const {
   os << "    units     mol/kgw\n";
   os << "    water     " << water_kg << '\n';
 
+  // PHREEQC needs a density to convert any /L unit to molality. With
+  // `calculate`, it iterates using the database's molar-volume data; if
+  // the database has no -Vm entries it falls back to 1.0 g/cm³ with a
+  // warning.
+  const bool any_per_liter = [&] {
+    for (const auto& c : components) {
+      const auto& u = c.units;
+      if (u.size() >= 2 && u.compare(u.size() - 2, 2, "/L") == 0)
+        return true;
+    }
+    return false;
+  }();
+  if (any_per_liter)
+    os << "    density   1.0 calculate\n";
+
   switch (ph.kind) {
     case PhSpec::Fixed:
       os << "    pH        " << ph.value << '\n';

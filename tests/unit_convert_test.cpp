@@ -35,7 +35,6 @@ static void test_kgw_prefixes() {
   UnitConvertInputs in; in.molality_mol_per_kgw = 1e-3;
   UnitConvertContext ctx; ctx.kg_water = 1.0;
   EXPECT(nearly(*convertFromMolality(in, ctx, "mmol/kgw"), 1.0));
-  EXPECT(nearly(*convertFromMolality(in, ctx, "umol/kgw"), 1e3));
 }
 
 static void test_kgw_independent_of_water_amount() {
@@ -55,18 +54,6 @@ static void test_mass_units_need_molar_mass() {
   in.molar_mass_g_per_mol = 23.0;  // Na
   EXPECT(nearly(*convertFromMolality(in, ctx, "g/kgw"),  0.23));
   EXPECT(nearly(*convertFromMolality(in, ctx, "mg/kgw"), 230.0));
-  EXPECT(nearly(*convertFromMolality(in, ctx, "ug/kgw"), 230000.0));
-}
-
-static void test_per_solution_units_need_kgs() {
-  UnitConvertInputs in; in.molality_mol_per_kgw = 0.01;
-  UnitConvertContext ctx; ctx.kg_water = 1.0;
-  EXPECT(!convertFromMolality(in, ctx, "mol/kgs").has_value());
-  ctx.kg_solution = 1.03;
-  EXPECT(nearly(*convertFromMolality(in, ctx, "mol/kgs"), 0.01 / 1.03));
-  in.molar_mass_g_per_mol = 58.44;
-  EXPECT(nearly(*convertFromMolality(in, ctx, "g/kgs"),
-                0.01 * 58.44 / 1.03));
 }
 
 static void test_per_liter_units_need_L() {
@@ -81,24 +68,18 @@ static void test_per_liter_units_need_L() {
   EXPECT(nearly(*convertFromMolality(in, ctx, "g/L"),    0.5 * 58.44 / 1.02));
 }
 
-static void test_absolute_units() {
-  UnitConvertInputs in; in.molality_mol_per_kgw = 0.5;
-  in.molar_mass_g_per_mol = 40.08;  // Ca
-  UnitConvertContext ctx; ctx.kg_water = 2.0;  // 2 kg of water
-  EXPECT(nearly(*convertFromMolality(in, ctx, "mol"),  1.0));
-  EXPECT(nearly(*convertFromMolality(in, ctx, "mmol"), 1000.0));
-  EXPECT(nearly(*convertFromMolality(in, ctx, "umol"), 1e6));
-  EXPECT(nearly(*convertFromMolality(in, ctx, "g"),    40.08 * 1.0));
-  EXPECT(nearly(*convertFromMolality(in, ctx, "mg"),   40.08 * 1000.0));
-}
-
 static void test_unknown_unit() {
   UnitConvertInputs in; in.molality_mol_per_kgw = 1.0;
-  UnitConvertContext ctx;
+  UnitConvertContext ctx; ctx.kg_water = 1.0; ctx.L_solution = 1.0;
   EXPECT(!convertFromMolality(in, ctx, "g/kqw").has_value());  // typo
   EXPECT(!convertFromMolality(in, ctx, "").has_value());
   EXPECT(!convertFromMolality(in, ctx, "mg/m3").has_value());
   EXPECT(!convertFromMolality(in, ctx, "MOL/KGW").has_value());  // case-sensitive
+  // Units intentionally removed from the supported set.
+  EXPECT(!convertFromMolality(in, ctx, "umol/kgw").has_value());
+  EXPECT(!convertFromMolality(in, ctx, "mol").has_value());
+  EXPECT(!convertFromMolality(in, ctx, "g").has_value());
+  EXPECT(!convertFromMolality(in, ctx, "g/kgs").has_value());
 }
 
 static void test_zero_denominator_is_unconvertible() {
@@ -113,7 +94,7 @@ static void test_all_listed_units_convert_when_fully_populated() {
   in.molality_mol_per_kgw = 1.0;
   in.molar_mass_g_per_mol = 18.0;
   UnitConvertContext ctx;
-  ctx.kg_water = 1.0; ctx.kg_solution = 1.0; ctx.L_solution = 1.0;
+  ctx.kg_water = 1.0; ctx.L_solution = 1.0;
   for (const auto& s : supportedUnits()) {
     auto v = convertFromMolality(in, ctx, s);
     if (!v) {
@@ -129,9 +110,7 @@ int main() {
   test_kgw_prefixes();
   test_kgw_independent_of_water_amount();
   test_mass_units_need_molar_mass();
-  test_per_solution_units_need_kgs();
   test_per_liter_units_need_L();
-  test_absolute_units();
   test_unknown_unit();
   test_zero_denominator_is_unconvertible();
   test_all_listed_units_convert_when_fully_populated();

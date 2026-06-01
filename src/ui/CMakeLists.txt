@@ -7,6 +7,8 @@ qt_add_library(qtchem_ui STATIC
   HtmlDelegate.cpp
   ChemDelegate.h
   ChemDelegate.cpp
+  UnitDelegate.h
+  UnitDelegate.cpp
   DatabaseEditorDialog.h
   DatabaseEditorDialog.cpp
   EntryEditForm.h

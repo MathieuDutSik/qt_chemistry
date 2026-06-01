@@ -13,3 +13,11 @@ add_test(NAME editable_database_test COMMAND editable_database_test)
 add_executable(unit_convert_test unit_convert_test.cpp)
 target_link_libraries(unit_convert_test PRIVATE qtchem_kernel)
 add_test(NAME unit_convert_test COMMAND unit_convert_test)
+
+add_executable(solution_units_emit_test solution_units_emit_test.cpp)
+target_link_libraries(solution_units_emit_test PRIVATE qtchem_kernel)
+add_test(NAME solution_units_emit_test COMMAND solution_units_emit_test)
+
+add_executable(water_density_test water_density_test.cpp)
+target_link_libraries(water_density_test PRIVATE qtchem_kernel)
+add_test(NAME water_density_test COMMAND water_density_test)

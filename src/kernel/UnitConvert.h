@@ -13,7 +13,6 @@ namespace qtchem {
 // returns std::nullopt instead of guessing.
 struct UnitConvertContext {
   double kg_water = 1.0;
-  std::optional<double> kg_solution;
   std::optional<double> L_solution;
 };
 
