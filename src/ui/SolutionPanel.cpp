@@ -92,9 +92,14 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
       {tr("Element"), tr("Master species"), tr("Total"),
        tr("Units"), tr("± %")});
   auto* hh = table_->horizontalHeader();
-  hh->setStretchLastSection(true);
+  hh->setStretchLastSection(false);
   hh->setSectionResizeMode(kColElement, QHeaderView::ResizeToContents);
   hh->setSectionResizeMode(kColMaster,  QHeaderView::ResizeToContents);
+  hh->setSectionResizeMode(kColTotal,   QHeaderView::Interactive);
+  hh->setSectionResizeMode(kColUnits,   QHeaderView::Interactive);
+  hh->setSectionResizeMode(kColPct,     QHeaderView::ResizeToContents);
+  table_->setColumnWidth(kColTotal, 110);
+  table_->setColumnWidth(kColUnits, 110);
   table_->verticalHeader()->setVisible(false);
   table_->setItemDelegateForColumn(kColUnits, new UnitDelegate(this));
   table_->setColumnHidden(kColPct, true);  // shown only in uncertainty mode

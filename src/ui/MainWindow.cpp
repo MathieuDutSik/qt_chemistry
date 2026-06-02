@@ -53,7 +53,9 @@ namespace {
 void setHeaders(QTableWidget* t, const QStringList& h) {
   t->setColumnCount(h.size());
   t->setHorizontalHeaderLabels(h);
-  t->horizontalHeader()->setStretchLastSection(true);
+  auto* hh = t->horizontalHeader();
+  hh->setStretchLastSection(false);
+  hh->setSectionResizeMode(QHeaderView::ResizeToContents);
   t->verticalHeader()->setVisible(false);
   t->setEditTriggers(QAbstractItemView::NoEditTriggers);
   t->setSelectionBehavior(QAbstractItemView::SelectRows);
