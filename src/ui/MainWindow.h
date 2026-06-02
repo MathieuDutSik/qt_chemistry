@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kernel/PhreeqcOutputParser.h"
+
 #include <QMainWindow>
 #include <memory>
 
@@ -15,7 +17,6 @@ namespace qtchem {
 class DatabaseInfo;
 class PhreeqcSession;
 class SolutionPanel;
-struct ParsedOutput;
 
 class MainWindow : public QMainWindow {
   Q_OBJECT
@@ -34,6 +35,7 @@ private slots:
 private:
   void populateDatabaseList(const QString& selectAbsolutePath = QString());
   void renderResults(const ParsedOutput& po);
+  void renderTotalsTab();
   QString buildDatabaseInfoHtml() const;
   bool isUserWritableDatabase(int index) const;
 
@@ -51,6 +53,14 @@ private:
   QTableWidget* si_table_ = nullptr;
   QTableWidget* assemblage_table_ = nullptr;
   QTableWidget* totals_table_ = nullptr;
+  QComboBox* totals_unit_initial_ = nullptr;
+  QComboBox* totals_unit_final_ = nullptr;
+  QComboBox* totals_unit_delta_ = nullptr;
+  QLabel* totals_unit_lbl_initial_ = nullptr;
+  QLabel* totals_unit_lbl_final_ = nullptr;
+  QLabel* totals_unit_lbl_delta_ = nullptr;
+  QLabel* totals_volume_source_ = nullptr;
+  ParsedOutput last_parsed_;
   QTableWidget* desc_table_ = nullptr;
   QPlainTextEdit* input_view_ = nullptr;
   QPlainTextEdit* output_view_ = nullptr;

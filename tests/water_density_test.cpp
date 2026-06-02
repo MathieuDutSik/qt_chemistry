@@ -6,6 +6,8 @@
 #include <string>
 
 using qtchem::DensitySource;
+using qtchem::VolumeSource;
+using qtchem::buildConvertContext;
 using qtchem::pureWaterDensity;
 using qtchem::resolveSolutionDensity;
 
@@ -65,12 +67,60 @@ static void test_resolver_rejects_nonsense_database_value() {
   EXPECT(d2.source == DensitySource::PureWaterFallback);
 }
 
+static void test_context_prefers_volume_directly() {
+  std::map<std::string, std::string> desc = {
+      {"Mass of water (kg)", "1.000e+00"},
+      {"Volume (L)",          "1.01278"},
+      {"Density (g/cm\xC2\xB3)", "1.02328"},
+      {"Temperature (\xC2\xB0""C)", "25.00"},
+  };
+  auto r = buildConvertContext(desc);
+  EXPECT(r.source == VolumeSource::Database);
+  EXPECT(r.context.kg_water == 1.0);
+  EXPECT(r.context.L_solution.has_value());
+  EXPECT(nearly(*r.context.L_solution, 1.01278));
+}
+
+static void test_context_falls_back_to_density_when_no_volume() {
+  std::map<std::string, std::string> desc = {
+      {"Mass of water (kg)", "2.0"},
+      {"Density (g/cm\xC2\xB3)", "1.10"},
+  };
+  auto r = buildConvertContext(desc);
+  EXPECT(r.source == VolumeSource::FromDatabaseDensity);
+  EXPECT(r.context.kg_water == 2.0);
+  EXPECT(r.context.L_solution.has_value());
+  EXPECT(nearly(*r.context.L_solution, 2.0 / 1.10));
+}
+
+static void test_context_falls_back_to_kell_at_temperature() {
+  std::map<std::string, std::string> desc = {
+      {"Temperature (\xC2\xB0""C)", "50.0"},
+  };
+  auto r = buildConvertContext(desc);
+  EXPECT(r.source == VolumeSource::PureWaterFallback);
+  EXPECT(r.context.kg_water == 1.0);  // default
+  EXPECT(r.context.L_solution.has_value());
+  EXPECT(nearly(*r.context.L_solution, 1.0 / 0.98804));
+}
+
+static void test_context_uses_fallback_temperature_when_absent() {
+  std::map<std::string, std::string> desc;  // nothing
+  auto r = buildConvertContext(desc, 25.0);
+  EXPECT(r.source == VolumeSource::PureWaterFallback);
+  EXPECT(nearly(*r.context.L_solution, 1.0 / 0.99705));
+}
+
 int main() {
   test_pure_water_reference_points();
   test_pure_water_rejects_out_of_range();
   test_resolver_prefers_database_value();
   test_resolver_falls_back_to_pure_water();
   test_resolver_rejects_nonsense_database_value();
+  test_context_prefers_volume_directly();
+  test_context_falls_back_to_density_when_no_volume();
+  test_context_falls_back_to_kell_at_temperature();
+  test_context_uses_fallback_temperature_when_absent();
   if (g_failures) {
     std::fprintf(stderr, "%d failure(s)\n", g_failures);
     return 1;

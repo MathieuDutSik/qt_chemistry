@@ -5,6 +5,8 @@
 #include "kernel/EquilibriumProblem.h"
 #include "kernel/PhreeqcOutputParser.h"
 #include "kernel/PhreeqcSession.h"
+#include "kernel/UnitConvert.h"
+#include "kernel/WaterDensity.h"
 #include "ui/ChemDelegate.h"
 #include "ui/DatabaseEditorDialog.h"
 #include "ui/HtmlDelegate.h"
@@ -126,7 +128,43 @@ MainWindow::MainWindow(QWidget* parent)
   result_tabs_ = new QTabWidget;
 
   totals_table_ = new QTableWidget(0, 0);
-  result_tabs_->addTab(totals_table_, tr("Element totals"));
+  {
+    auto* totals_tab = new QWidget;
+    auto* totals_lay = new QVBoxLayout(totals_tab);
+    totals_lay->setContentsMargins(0, 0, 0, 0);
+
+    auto* bar = new QHBoxLayout;
+    bar->addWidget(new QLabel(tr("Units —")));
+    auto make_combo = [this]() {
+      auto* cb = new QComboBox;
+      for (const auto& u : supportedUnits())
+        cb->addItem(QString::fromStdString(u));
+      cb->setCurrentText(QStringLiteral("mol/kgw"));
+      connect(cb, &QComboBox::currentTextChanged, this,
+              [this](const QString&) { renderTotalsTab(); });
+      return cb;
+    };
+    totals_unit_lbl_initial_ = new QLabel(tr("Initial:"));
+    totals_unit_initial_     = make_combo();
+    totals_unit_lbl_final_   = new QLabel(tr("Final:"));
+    totals_unit_final_       = make_combo();
+    totals_unit_lbl_delta_   = new QLabel(tr("Δ:"));
+    totals_unit_delta_       = make_combo();
+    bar->addWidget(totals_unit_lbl_initial_);
+    bar->addWidget(totals_unit_initial_);
+    bar->addWidget(totals_unit_lbl_final_);
+    bar->addWidget(totals_unit_final_);
+    bar->addWidget(totals_unit_lbl_delta_);
+    bar->addWidget(totals_unit_delta_);
+    bar->addStretch(1);
+    totals_volume_source_ = new QLabel;
+    totals_volume_source_->setStyleSheet("color: #555;");
+    bar->addWidget(totals_volume_source_);
+    totals_lay->addLayout(bar);
+    totals_lay->addWidget(totals_table_, 1);
+
+    result_tabs_->addTab(totals_tab, tr("Element totals"));
+  }
   desc_table_ = new QTableWidget(0, 0);
   result_tabs_->addTab(desc_table_, tr("Solution properties"));
 
@@ -343,13 +381,37 @@ void MainWindow::onRun() {
                    ? tr("  (reaction step ran)") : QString()));
 }
 
-void MainWindow::renderResults(const ParsedOutput& po) {
+void MainWindow::renderTotalsTab() {
   const Frame empty_frame;
-  const Frame& initial = po.frames.empty() ? empty_frame : po.frames.front();
-  const Frame& final = po.frames.empty() ? empty_frame : po.frames.back();
-  const bool two_frames = po.frames.size() >= 2;
+  const Frame& initial = last_parsed_.frames.empty()
+                             ? empty_frame : last_parsed_.frames.front();
+  const Frame& final = last_parsed_.frames.empty()
+                           ? empty_frame : last_parsed_.frames.back();
+  const bool two_frames = last_parsed_.frames.size() >= 2;
 
-  // ----- Element totals (with initial/final/Δ when two frames exist) -----
+  // Toolbar visibility: single-frame uses only the "Initial" combo as the
+  // single Total unit; two-frame shows all three.
+  totals_unit_lbl_initial_->setVisible(true);
+  totals_unit_initial_->setVisible(true);
+  totals_unit_lbl_initial_->setText(two_frames ? tr("Initial:") : tr("Total:"));
+  totals_unit_lbl_final_->setVisible(two_frames);
+  totals_unit_final_->setVisible(two_frames);
+  totals_unit_lbl_delta_->setVisible(two_frames);
+  totals_unit_delta_->setVisible(two_frames);
+
+  // Resolve the frame-wide conversion context from PHREEQC's description.
+  // Single-frame: use the only frame. Two-frame: use the final frame's
+  // description for Initial+Final columns (they share a solution), but for
+  // Δ the choice is somewhat arbitrary — use final as well.
+  const auto res = buildConvertContext(final.description, 25.0);
+  const UnitConvertContext ctx = res.context;
+  const char* src_label =
+      res.source == VolumeSource::Database          ? "from DB"
+    : res.source == VolumeSource::FromDatabaseDensity ? "from DB (ρ)"
+                                                     : "Kell EOS";
+  totals_volume_source_->setText(tr("volume: %1").arg(QString(src_label)));
+
+  // Collate rows by element root.
   std::map<std::string, const ElementTotalRow*> init_by_root, final_by_root;
   std::vector<std::string> ordered_roots;
   auto add_root = [&](const std::string& r) {
@@ -366,17 +428,29 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     final_by_root[r] = &t; add_root(r);
   }
 
+  const std::string u_initial = totals_unit_initial_->currentText().toStdString();
+  const std::string u_final   = totals_unit_final_->currentText().toStdString();
+  const std::string u_delta   = totals_unit_delta_->currentText().toStdString();
+
   if (two_frames) {
     setHeaders(totals_table_,
                {tr("Element"), tr("Master species"),
-                tr("Initial (mol/kgw)"), tr("Final (mol/kgw)"),
-                tr("Δ (mol/kgw)"), tr("Δ (g/kgw)")});
+                tr("Initial (%1)").arg(QString::fromStdString(u_initial)),
+                tr("Final (%1)").arg(QString::fromStdString(u_final)),
+                tr("Δ (%1)").arg(QString::fromStdString(u_delta))});
   } else {
     setHeaders(totals_table_,
                {tr("Element"), tr("Master species"),
-                tr("Molality (mol/kgw)"), tr("Mass (g/kgw)"), tr("Moles")});
+                tr("Total (%1)").arg(QString::fromStdString(u_initial))});
   }
   totals_table_->setRowCount(ordered_roots.size());
+  auto cell = [&](double molality, double aw, const std::string& unit) {
+    UnitConvertInputs in;
+    in.molality_mol_per_kgw = molality;
+    if (aw > 0.0) in.molar_mass_g_per_mol = aw;
+    auto v = convertFromMolality(in, ctx, unit);
+    return v ? sciItem(*v) : textItem(QStringLiteral("—"));
+  };
   for (size_t i = 0; i < ordered_roots.size(); ++i) {
     const std::string& root = ordered_roots[i];
     auto* init = init_by_root.count(root) ? init_by_root[root] : nullptr;
@@ -393,26 +467,31 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     }
     totals_table_->setItem(i, 1, textItem(master));
     if (two_frames) {
-      if (init) totals_table_->setItem(i, 2, sciItem(init->molality));
-      else      totals_table_->setItem(i, 2, textItem(QStringLiteral("—")));
-      if (fin)  totals_table_->setItem(i, 3, sciItem(fin->molality));
-      else      totals_table_->setItem(i, 3, textItem(QStringLiteral("—")));
+      totals_table_->setItem(i, 2,
+          init ? cell(init->molality, aw, u_initial)
+               : textItem(QStringLiteral("—")));
+      totals_table_->setItem(i, 3,
+          fin ? cell(fin->molality, aw, u_final)
+              : textItem(QStringLiteral("—")));
       const double dm = (fin ? fin->molality : 0.0)
                       - (init ? init->molality : 0.0);
-      totals_table_->setItem(i, 4, sciItem(dm));
-      if (aw > 0.0)
-        totals_table_->setItem(i, 5, sciItem(dm * aw));
-      else
-        totals_table_->setItem(i, 5, textItem(QStringLiteral("—")));
+      totals_table_->setItem(i, 4, cell(dm, aw, u_delta));
     } else {
-      const double mol = fin ? fin->molality : (init ? init->molality : 0.0);
-      const double moles = fin ? fin->moles : (init ? init->moles : 0.0);
-      totals_table_->setItem(i, 2, sciItem(mol));
-      totals_table_->setItem(i, 3,
-          aw > 0.0 ? sciItem(mol * aw) : textItem(QStringLiteral("—")));
-      totals_table_->setItem(i, 4, sciItem(moles));
+      const double mol = fin ? fin->molality
+                              : (init ? init->molality : 0.0);
+      totals_table_->setItem(i, 2, cell(mol, aw, u_initial));
     }
   }
+}
+
+void MainWindow::renderResults(const ParsedOutput& po) {
+  last_parsed_ = po;
+  renderTotalsTab();
+
+  const Frame empty_frame;
+  const Frame& initial = po.frames.empty() ? empty_frame : po.frames.front();
+  const Frame& final = po.frames.empty() ? empty_frame : po.frames.back();
+  const bool two_frames = po.frames.size() >= 2;
 
   // ----- Description -----
   if (two_frames) {

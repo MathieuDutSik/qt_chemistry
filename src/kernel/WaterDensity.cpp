@@ -1,6 +1,7 @@
 #include "kernel/WaterDensity.h"
 
 #include <cstdlib>
+#include <optional>
 
 namespace qtchem {
 
@@ -19,20 +20,60 @@ double pureWaterDensity(double T) {
   return (num / den) / 1000.0;
 }
 
+namespace {
+
+// The parser preserves description keys verbatim — including the UTF-8
+// superscript three (³ = 0xC2 0xB3) and degree sign (° = 0xC2 0xB0)
+// PHREEQC writes.
+const std::string kKeyDensity = "Density (g/cm\xC2\xB3)";
+const std::string kKeyVolume  = "Volume (L)";
+const std::string kKeyMassW   = "Mass of water (kg)";
+const std::string kKeyTempC   = "Temperature (\xC2\xB0""C)";
+
+std::optional<double> parseStrict(const std::map<std::string, std::string>& d,
+                                  const std::string& key) {
+  auto it = d.find(key);
+  if (it == d.end()) return std::nullopt;
+  char* end = nullptr;
+  const double v = std::strtod(it->second.c_str(), &end);
+  if (end == it->second.c_str()) return std::nullopt;
+  return v;
+}
+
+}
+
 SolutionDensity resolveSolutionDensity(
     const std::map<std::string, std::string>& description,
     double temperature_c) {
-  // The parser preserves the key verbatim — including the UTF-8 superscript
-  // three (³ = 0xC2 0xB3) PHREEQC writes.
-  static const std::string kKey = "Density (g/cm\xC2\xB3)";
-  auto it = description.find(kKey);
-  if (it != description.end()) {
-    char* end = nullptr;
-    const double v = std::strtod(it->second.c_str(), &end);
-    if (end != it->second.c_str() && v > 0.5 && v < 2.0)
-      return {v, DensitySource::Database};
-  }
+  auto v = parseStrict(description, kKeyDensity);
+  if (v && *v > 0.5 && *v < 2.0)
+    return {*v, DensitySource::Database};
   return {pureWaterDensity(temperature_c), DensitySource::PureWaterFallback};
+}
+
+ConvertContextResolution buildConvertContext(
+    const std::map<std::string, std::string>& description,
+    double fallback_temperature_c) {
+  UnitConvertContext ctx;
+  ctx.kg_water = parseStrict(description, kKeyMassW).value_or(1.0);
+  if (ctx.kg_water <= 0.0) ctx.kg_water = 1.0;
+
+  auto vol = parseStrict(description, kKeyVolume);
+  if (vol && *vol > 0.0) {
+    ctx.L_solution = *vol;
+    return {ctx, VolumeSource::Database};
+  }
+
+  const double T = parseStrict(description, kKeyTempC).value_or(
+      fallback_temperature_c);
+  auto dens = parseStrict(description, kKeyDensity);
+  if (dens && *dens > 0.5 && *dens < 2.0) {
+    ctx.L_solution = ctx.kg_water / *dens;
+    return {ctx, VolumeSource::FromDatabaseDensity};
+  }
+  const double rho = pureWaterDensity(T);
+  if (rho > 0.0) ctx.L_solution = ctx.kg_water / rho;
+  return {ctx, VolumeSource::PureWaterFallback};
 }
 
 }
