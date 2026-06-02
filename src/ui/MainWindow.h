@@ -31,6 +31,7 @@ private slots:
   void onDuplicateDatabase();
   void onEditDatabase();
   void onShowSpeciesColumnHelp();
+  void onShowSaturationColumnHelp();
 
 private:
   void populateDatabaseList(const QString& selectAbsolutePath = QString());

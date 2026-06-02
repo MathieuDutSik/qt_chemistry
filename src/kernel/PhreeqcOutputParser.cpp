@@ -187,7 +187,6 @@ ParsedOutput parsePhreeqcOutput(const std::string& raw) {
           r.si = to_double_or(toks[1]);
           r.log_iap = to_double_or(toks[2]);
           r.log_k = to_double_or(toks[3]);
-          if (toks.size() >= 5) r.formula = toks[4];
           cur_si.push_back(r);
         }
         break;

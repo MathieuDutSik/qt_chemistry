@@ -23,7 +23,6 @@ struct SaturationRow {
   double si = 0.0;
   double log_iap = 0.0;
   double log_k = 0.0;
-  std::string formula;
 };
 
 struct PhaseAssemblageRow {

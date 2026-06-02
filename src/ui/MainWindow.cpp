@@ -207,12 +207,39 @@ MainWindow::MainWindow(QWidget* parent)
   species_lay->addWidget(species_table_, 1);
   result_tabs_->addTab(species_tab, tr("Species"));
 
-  si_table_ = new QTableWidget(0, 6);
+  si_table_ = new QTableWidget(0, 5);
   setHeaders(si_table_, {tr("Phase"), tr("Reaction"), tr("log K"),
-                         tr("SI"), tr("log IAP"), tr("Formula")});
+                         tr("SI"), tr("log IAP")});
   si_table_->setItemDelegateForColumn(
       1, new ChemDelegate(ChemDelegate::Mode::Reaction, this));
-  result_tabs_->addTab(si_table_, tr("Saturation indices"));
+  const QStringList siHeaderTips = {
+      tr("Mineral / gas phase the row reports on."),
+      tr("Dissolution reaction as written in the database "
+         "(e.g. Calcite ⇌ Ca²⁺ + CO₃²⁻). The log K and IAP are "
+         "expressed in terms of this reaction."),
+      tr("log₁₀ K — equilibrium constant of the dissolution reaction "
+         "at the run's T and P. From the database."),
+      tr("Saturation index: SI = log IAP − log K. >0 supersaturated "
+         "(can precipitate); =0 at equilibrium; <0 undersaturated "
+         "(will dissolve if present)."),
+      tr("log₁₀ IAP — log of the ion-activity product computed from "
+         "the actual species activities in the modelled solution.")};
+  for (int c = 0; c < siHeaderTips.size(); ++c) {
+    if (auto* h = si_table_->horizontalHeaderItem(c))
+      h->setToolTip(siHeaderTips[c]);
+  }
+  auto* si_tab = new QWidget;
+  auto* si_lay = new QVBoxLayout(si_tab);
+  si_lay->setContentsMargins(0, 0, 0, 0);
+  auto* si_help = new QLabel(
+      tr("<a href=\"#\">What do these columns mean?</a>"));
+  si_help->setTextFormat(Qt::RichText);
+  si_help->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+  connect(si_help, &QLabel::linkActivated, this,
+          &MainWindow::onShowSaturationColumnHelp);
+  si_lay->addWidget(si_help);
+  si_lay->addWidget(si_table_, 1);
+  result_tabs_->addTab(si_tab, tr("Saturation indices"));
 
   assemblage_table_ = new QTableWidget(0, 6);
   setHeaders(assemblage_table_, {tr("Phase"), tr("Reaction"), tr("SI"),
@@ -576,7 +603,6 @@ void MainWindow::renderResults(const ParsedOutput& po) {
     si_table_->setItem(i, 2, numItem(s.log_k, 'f', 3));
     si_table_->setItem(i, 3, numItem(s.si, 'f', 3));
     si_table_->setItem(i, 4, numItem(s.log_iap, 'f', 3));
-    si_table_->setItem(i, 5, textItem(QString::fromStdString(s.formula)));
   }
 
   assemblage_table_->setRowCount(po.assemblage.size());
@@ -689,6 +715,61 @@ void MainWindow::onShowSpeciesColumnHelp() {
       "<p>The trailing <code>g</code> in the name is a PHREEQC tag, not a "
       "physical-state marker — these species are dissolved in solution, "
       "not gaseous.</p>"));
+  layout->addWidget(browser, 1);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  layout->addWidget(buttons);
+  dlg.exec();
+}
+
+void MainWindow::onShowSaturationColumnHelp() {
+  QDialog dlg(this);
+  dlg.setWindowTitle(tr("Saturation indices columns"));
+  dlg.resize(680, 520);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* browser = new QTextBrowser;
+  browser->setOpenExternalLinks(true);
+  browser->setHtml(tr(
+      "<h2>Saturation indices columns</h2>"
+      "<p>Each row reports how close the modelled solution is to "
+      "equilibrium with one mineral or gas <b>phase</b>. PHREEQC writes "
+      "the dissolution reaction of that phase and compares the activities "
+      "currently in solution against the database's equilibrium constant.</p>"
+      "<h3>Phase</h3>"
+      "<p>The mineral, gas, or organic-matter phase the row refers to "
+      "(e.g. <code>Calcite</code>, <code>CO2(g)</code>). The same name "
+      "is what you would put in an <code>EQUILIBRIUM_PHASES</code> block.</p>"
+      "<h3>Reaction</h3>"
+      "<p>The dissolution reaction <i>as written in the database</i>, "
+      "e.g. Calcite ⇌ Ca<sup>2+</sup> + CO<sub>3</sub><sup>2−</sup>. "
+      "Both <i>log K</i> and <i>log IAP</i> are expressed in terms of "
+      "this exact stoichiometry — the direction matters.</p>"
+      "<h3>log K</h3>"
+      "<p>Base-10 logarithm of the equilibrium constant <i>K</i> for the "
+      "reaction above, at the run's temperature and pressure. From the "
+      "database. For Calcite at 25 °C, log K ≈ −8.48.</p>"
+      "<h3>SI &nbsp;(saturation index)</h3>"
+      "<p>The headline number. Defined as:</p>"
+      "<p style='margin-left:2em;'><i>SI = log IAP − log K</i></p>"
+      "<ul>"
+      "<li><b>SI &gt; 0</b> — supersaturated: thermodynamically the phase "
+      "<i>can</i> precipitate. Kinetics may stop it (e.g. seawater is "
+      "supersaturated for both calcite and aragonite at the surface).</li>"
+      "<li><b>SI = 0</b> — at equilibrium with the phase.</li>"
+      "<li><b>SI &lt; 0</b> — undersaturated: if the phase is present it "
+      "will dissolve toward equilibrium.</li>"
+      "</ul>"
+      "<p>SI is a <i>thermodynamic</i> driving force — it tells you the "
+      "direction and the distance from equilibrium, not the rate.</p>"
+      "<h3>log IAP &nbsp;(ion-activity product)</h3>"
+      "<p>Base-10 logarithm of the activity product computed from the "
+      "<i>actual</i> species activities in the modelled solution, raised "
+      "to the stoichiometric coefficients of the reaction. For "
+      "Calcite ⇌ Ca<sup>2+</sup> + CO<sub>3</sub><sup>2−</sup>:</p>"
+      "<p style='margin-left:2em;'><i>IAP = a(Ca<sup>2+</sup>) · "
+      "a(CO<sub>3</sub><sup>2−</sup>)</i></p>"
+      "<p>Mostly useful as a diagnostic — the actionable number is SI.</p>"));
   layout->addWidget(browser, 1);
   auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
   connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
