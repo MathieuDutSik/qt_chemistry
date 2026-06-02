@@ -6,6 +6,7 @@
 #include <QMainWindow>
 #include <memory>
 
+class QAction;
 class QComboBox;
 class QPlainTextEdit;
 class QLabel;
@@ -27,7 +28,7 @@ public:
 
 private slots:
   void onDatabaseChanged(int index);
-  void onRun(bool monte_carlo);
+  void onRun();
   void onShowDatabaseInfo();
   void onDuplicateDatabase();
   void onEditDatabase();
@@ -67,6 +68,8 @@ private:
   bool last_mc_active_ = false;
   QComboBox* totals_metric_ = nullptr;
   QLabel* totals_metric_lbl_ = nullptr;
+  QAction* mode_direct_action_ = nullptr;
+  QAction* mode_mc_action_ = nullptr;
   QTableWidget* desc_table_ = nullptr;
   QPlainTextEdit* input_view_ = nullptr;
   QPlainTextEdit* output_view_ = nullptr;

@@ -103,28 +103,25 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
                      "total, expressed as a percentage. 0 = no perturbation."));
   root->addWidget(table_, 1);
 
-  mc_group_ = new QGroupBox(tr("Sweep with uncertainty (Monte Carlo)"));
-  mc_group_->setCheckable(true);
-  mc_group_->setChecked(false);
+  mc_group_ = new QGroupBox(tr("Uncertainty (Monte Carlo)"));
   auto* mc_form = new QFormLayout(mc_group_);
   mc_dt_ = new QDoubleSpinBox;
   mc_dt_->setRange(0, 50); mc_dt_->setDecimals(2); mc_dt_->setSuffix(" °C");
+  mc_dt_->setValue(1.0);
   mc_form->addRow(tr("± Temperature"), mc_dt_);
   mc_dp_ = new QDoubleSpinBox;
   mc_dp_->setRange(0, 500); mc_dp_->setDecimals(3); mc_dp_->setSuffix(" atm");
   mc_form->addRow(tr("± Pressure"), mc_dp_);
   mc_dph_ = new QDoubleSpinBox;
   mc_dph_->setRange(0, 5); mc_dph_->setDecimals(2);
+  mc_dph_->setValue(0.05);
   mc_form->addRow(tr("± pH (only if fixed)"), mc_dph_);
   mc_runtime_ = new QDoubleSpinBox;
   mc_runtime_->setRange(0.1, 600); mc_runtime_->setDecimals(1);
   mc_runtime_->setSuffix(" s"); mc_runtime_->setValue(2.0);
   mc_form->addRow(tr("Max runtime"), mc_runtime_);
+  mc_group_->setVisible(false);  // direct mode by default
   root->addWidget(mc_group_);
-
-  connect(mc_group_, &QGroupBox::toggled, this, [this](bool on) {
-    table_->setColumnHidden(kColPct, !on);
-  });
 
   auto* btns = new QHBoxLayout;
   auto* add = new QPushButton(tr("+ row"));
@@ -141,9 +138,7 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   connect(rem, &QPushButton::clicked, this, &SolutionPanel::onRemoveRow);
   connect(sample, &QPushButton::clicked, this, &SolutionPanel::loadSampleSeawater);
   connect(clear, &QPushButton::clicked, this, &SolutionPanel::loadEmpty);
-  connect(run, &QPushButton::clicked, this, [this]() {
-    emit runRequested(mc_group_ && mc_group_->isChecked());
-  });
+  connect(run, &QPushButton::clicked, this, &SolutionPanel::runRequested);
   connect(table_, &QTableWidget::cellChanged,
           this, &SolutionPanel::onCellChanged);
 
@@ -211,8 +206,10 @@ void SolutionPanel::setRow(int row, const QString& el, double total,
   refreshMasterSpecies(row);
 }
 
-bool SolutionPanel::uncertaintyEnabled() const {
-  return mc_group_ && mc_group_->isChecked();
+void SolutionPanel::setUncertaintyEnabled(bool on) {
+  mc_enabled_ = on;
+  if (mc_group_) mc_group_->setVisible(on);
+  if (table_) table_->setColumnHidden(kColPct, !on);
 }
 
 UncertaintySpec SolutionPanel::buildUncertaintySpec() const {

@@ -27,15 +27,15 @@ public:
   void setDatabaseInfo(std::shared_ptr<const DatabaseInfo> info);
 
   EquilibriumProblem buildProblem(QStringList* warnings = nullptr) const;
-  bool uncertaintyEnabled() const;
+  void setUncertaintyEnabled(bool on);
+  bool uncertaintyEnabled() const { return mc_enabled_; }
   UncertaintySpec buildUncertaintySpec() const;
   MonteCarloBudget buildMonteCarloBudget() const;
   void loadSampleSeawater();
   void loadEmpty();
 
 signals:
-  // emitted when Run is clicked; mc==true iff the uncertainty box is checked
-  void runRequested(bool mc);
+  void runRequested();
 
 private slots:
   void onAddRow();
@@ -63,6 +63,7 @@ private:
   QDoubleSpinBox* mc_dp_ = nullptr;
   QDoubleSpinBox* mc_dph_ = nullptr;
   QDoubleSpinBox* mc_runtime_ = nullptr;
+  bool mc_enabled_ = false;
 
   std::shared_ptr<const DatabaseInfo> db_info_;
 };

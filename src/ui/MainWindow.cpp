@@ -12,9 +12,13 @@
 #include "ui/HtmlDelegate.h"
 #include "ui/SolutionPanel.h"
 
+#include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QComboBox>
 #include <QDialog>
+#include <QMenu>
+#include <QMenuBar>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
@@ -292,6 +296,26 @@ MainWindow::MainWindow(QWidget* parent)
   connect(solution_panel_, &SolutionPanel::runRequested,
           this, &MainWindow::onRun);
 
+  // Menu bar — Mode picker.
+  auto* mode_menu = menuBar()->addMenu(tr("&Mode"));
+  auto* mode_group = new QActionGroup(this);
+  mode_group->setExclusive(true);
+  mode_direct_action_ = mode_menu->addAction(tr("&Direct call"));
+  mode_direct_action_->setCheckable(true);
+  mode_direct_action_->setChecked(true);
+  mode_direct_action_->setActionGroup(mode_group);
+  mode_mc_action_ = mode_menu->addAction(
+      tr("Computation under &uncertainty (Monte Carlo)"));
+  mode_mc_action_->setCheckable(true);
+  mode_mc_action_->setActionGroup(mode_group);
+  connect(mode_mc_action_, &QAction::toggled, this, [this](bool on) {
+    solution_panel_->setUncertaintyEnabled(on);
+    if (!on) {
+      last_mc_active_ = false;
+      last_mc_result_ = MonteCarloResult{};
+      renderTotalsTab();
+    }
+  });
 }
 
 MainWindow::~MainWindow() = default;
@@ -391,7 +415,8 @@ void MainWindow::onEditDatabase() {
       tr("Saved %1").arg(QFileInfo(current_database_path_).fileName()));
 }
 
-void MainWindow::onRun(bool monte_carlo) {
+void MainWindow::onRun() {
+  const bool monte_carlo = mode_mc_action_ && mode_mc_action_->isChecked();
   QStringList warnings;
   const auto problem = solution_panel_->buildProblem(&warnings);
 
