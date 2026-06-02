@@ -315,6 +315,7 @@ MainWindow::MainWindow(QWidget* parent)
     if (!on) {
       last_mc_active_ = false;
       last_mc_result_ = MonteCarloResult{};
+      solution_panel_->setLastMonteCarloCount(-1, 0.0);
       renderTotalsTab();
     }
   });
@@ -467,6 +468,8 @@ void MainWindow::onRun() {
   // Show the baseline output in the raw panes so the existing view-flow stays
   // useful; the MC stats drive the totals tab.
   renderResults(last_mc_result_.baseline);
+  solution_panel_->setLastMonteCarloCount(last_mc_result_.runs_completed,
+                                          last_mc_result_.elapsed_seconds);
   statusBar()->showMessage(
       tr("OK — %1 MC runs in %2 s (baseline + %3 perturbed)")
           .arg(last_mc_result_.runs_completed + 1)

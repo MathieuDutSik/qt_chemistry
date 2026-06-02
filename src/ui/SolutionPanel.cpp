@@ -124,7 +124,14 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   mc_runtime_ = new QDoubleSpinBox;
   mc_runtime_->setRange(0.1, 600); mc_runtime_->setDecimals(1);
   mc_runtime_->setSuffix(" s"); mc_runtime_->setValue(2.0);
-  mc_form->addRow(tr("Max runtime"), mc_runtime_);
+  mc_last_count_ = new QLabel(tr("(last run: —)"));
+  mc_last_count_->setStyleSheet("color: #555;");
+  auto* runtime_row = new QHBoxLayout;
+  runtime_row->setContentsMargins(0, 0, 0, 0);
+  runtime_row->addWidget(mc_runtime_);
+  runtime_row->addWidget(mc_last_count_);
+  runtime_row->addStretch(1);
+  mc_form->addRow(tr("Max runtime"), runtime_row);
   mc_group_->setVisible(false);  // direct mode by default
   root->addWidget(mc_group_);
 
@@ -238,6 +245,19 @@ MonteCarloBudget SolutionPanel::buildMonteCarloBudget() const {
   MonteCarloBudget b;
   if (mc_runtime_) b.max_seconds = mc_runtime_->value();
   return b;
+}
+
+void SolutionPanel::setLastMonteCarloCount(int n_perturbed_runs,
+                                            double elapsed_s) {
+  if (!mc_last_count_) return;
+  if (n_perturbed_runs < 0) {
+    mc_last_count_->setText(tr("(last run: —)"));
+  } else {
+    mc_last_count_->setText(
+        tr("(last run: %1 simulations in %2 s)")
+            .arg(n_perturbed_runs)
+            .arg(QString::number(elapsed_s, 'f', 2)));
+  }
 }
 
 void SolutionPanel::onAddRow() {

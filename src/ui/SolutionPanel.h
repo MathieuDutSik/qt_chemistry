@@ -31,6 +31,8 @@ public:
   bool uncertaintyEnabled() const { return mc_enabled_; }
   UncertaintySpec buildUncertaintySpec() const;
   MonteCarloBudget buildMonteCarloBudget() const;
+  // n_perturbed_runs = baseline-excluded; reset with n=-1.
+  void setLastMonteCarloCount(int n_perturbed_runs, double elapsed_s);
   void loadSampleSeawater();
   void loadEmpty();
 
@@ -63,6 +65,7 @@ private:
   QDoubleSpinBox* mc_dp_ = nullptr;
   QDoubleSpinBox* mc_dph_ = nullptr;
   QDoubleSpinBox* mc_runtime_ = nullptr;
+  QLabel* mc_last_count_ = nullptr;
   bool mc_enabled_ = false;
 
   std::shared_ptr<const DatabaseInfo> db_info_;
