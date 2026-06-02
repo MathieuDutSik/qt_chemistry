@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -23,6 +24,7 @@ constexpr int kColElement = 0;
 constexpr int kColMaster  = 1;
 constexpr int kColTotal   = 2;
 constexpr int kColUnits   = 3;
+constexpr int kColPct     = 4;
 }
 
 SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
@@ -85,16 +87,44 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   db_hint_->setStyleSheet("color: #555; font-size: 11px;");
   root->addWidget(db_hint_);
 
-  table_ = new QTableWidget(0, 4);
+  table_ = new QTableWidget(0, 5);
   table_->setHorizontalHeaderLabels(
-      {tr("Element"), tr("Master species"), tr("Total"), tr("Units")});
+      {tr("Element"), tr("Master species"), tr("Total"),
+       tr("Units"), tr("± %")});
   auto* hh = table_->horizontalHeader();
   hh->setStretchLastSection(true);
   hh->setSectionResizeMode(kColElement, QHeaderView::ResizeToContents);
   hh->setSectionResizeMode(kColMaster,  QHeaderView::ResizeToContents);
   table_->verticalHeader()->setVisible(false);
   table_->setItemDelegateForColumn(kColUnits, new UnitDelegate(this));
+  table_->setColumnHidden(kColPct, true);  // shown only in uncertainty mode
+  if (auto* h = table_->horizontalHeaderItem(kColPct))
+    h->setToolTip(tr("Half-width of the uniform perturbation on this row's "
+                     "total, expressed as a percentage. 0 = no perturbation."));
   root->addWidget(table_, 1);
+
+  mc_group_ = new QGroupBox(tr("Sweep with uncertainty (Monte Carlo)"));
+  mc_group_->setCheckable(true);
+  mc_group_->setChecked(false);
+  auto* mc_form = new QFormLayout(mc_group_);
+  mc_dt_ = new QDoubleSpinBox;
+  mc_dt_->setRange(0, 50); mc_dt_->setDecimals(2); mc_dt_->setSuffix(" °C");
+  mc_form->addRow(tr("± Temperature"), mc_dt_);
+  mc_dp_ = new QDoubleSpinBox;
+  mc_dp_->setRange(0, 500); mc_dp_->setDecimals(3); mc_dp_->setSuffix(" atm");
+  mc_form->addRow(tr("± Pressure"), mc_dp_);
+  mc_dph_ = new QDoubleSpinBox;
+  mc_dph_->setRange(0, 5); mc_dph_->setDecimals(2);
+  mc_form->addRow(tr("± pH (only if fixed)"), mc_dph_);
+  mc_runtime_ = new QDoubleSpinBox;
+  mc_runtime_->setRange(0.1, 600); mc_runtime_->setDecimals(1);
+  mc_runtime_->setSuffix(" s"); mc_runtime_->setValue(2.0);
+  mc_form->addRow(tr("Max runtime"), mc_runtime_);
+  root->addWidget(mc_group_);
+
+  connect(mc_group_, &QGroupBox::toggled, this, [this](bool on) {
+    table_->setColumnHidden(kColPct, !on);
+  });
 
   auto* btns = new QHBoxLayout;
   auto* add = new QPushButton(tr("+ row"));
@@ -111,7 +141,9 @@ SolutionPanel::SolutionPanel(QWidget* parent) : QWidget(parent) {
   connect(rem, &QPushButton::clicked, this, &SolutionPanel::onRemoveRow);
   connect(sample, &QPushButton::clicked, this, &SolutionPanel::loadSampleSeawater);
   connect(clear, &QPushButton::clicked, this, &SolutionPanel::loadEmpty);
-  connect(run, &QPushButton::clicked, this, &SolutionPanel::runRequested);
+  connect(run, &QPushButton::clicked, this, [this]() {
+    emit runRequested(mc_group_ && mc_group_->isChecked());
+  });
   connect(table_, &QTableWidget::cellChanged,
           this, &SolutionPanel::onCellChanged);
 
@@ -173,7 +205,37 @@ void SolutionPanel::setRow(int row, const QString& el, double total,
   it1->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
   table_->setItem(row, kColTotal, it1);
   table_->setItem(row, kColUnits, new QTableWidgetItem(units));
+  auto* pct = new QTableWidgetItem(QStringLiteral("0"));
+  pct->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  table_->setItem(row, kColPct, pct);
   refreshMasterSpecies(row);
+}
+
+bool SolutionPanel::uncertaintyEnabled() const {
+  return mc_group_ && mc_group_->isChecked();
+}
+
+UncertaintySpec SolutionPanel::buildUncertaintySpec() const {
+  UncertaintySpec s;
+  if (!uncertaintyEnabled()) return s;
+  if (mc_dt_->value()  > 0.0) s.temperature_delta_c = mc_dt_->value();
+  if (mc_dp_->value()  > 0.0) s.pressure_delta_atm  = mc_dp_->value();
+  if (mc_dph_->value() > 0.0) s.ph_delta            = mc_dph_->value();
+  s.concentration_percent.reserve(table_->rowCount());
+  for (int r = 0; r < table_->rowCount(); ++r) {
+    auto* el  = table_->item(r, kColElement);
+    if (!el || el->text().trimmed().isEmpty()) continue;
+    auto* pct = table_->item(r, kColPct);
+    const double v = pct ? pct->text().toDouble() : 0.0;
+    s.concentration_percent.push_back(v / 100.0);  // % → fraction
+  }
+  return s;
+}
+
+MonteCarloBudget SolutionPanel::buildMonteCarloBudget() const {
+  MonteCarloBudget b;
+  if (mc_runtime_) b.max_seconds = mc_runtime_->value();
+  return b;
 }
 
 void SolutionPanel::onAddRow() {

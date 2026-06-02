@@ -1,5 +1,6 @@
 #pragma once
 
+#include "kernel/MonteCarlo.h"
 #include "kernel/PhreeqcOutputParser.h"
 
 #include <QMainWindow>
@@ -26,7 +27,7 @@ public:
 
 private slots:
   void onDatabaseChanged(int index);
-  void onRun();
+  void onRun(bool monte_carlo);
   void onShowDatabaseInfo();
   void onDuplicateDatabase();
   void onEditDatabase();
@@ -62,6 +63,10 @@ private:
   QLabel* totals_unit_lbl_delta_ = nullptr;
   QLabel* totals_volume_source_ = nullptr;
   ParsedOutput last_parsed_;
+  MonteCarloResult last_mc_result_;
+  bool last_mc_active_ = false;
+  QComboBox* totals_metric_ = nullptr;
+  QLabel* totals_metric_lbl_ = nullptr;
   QTableWidget* desc_table_ = nullptr;
   QPlainTextEdit* input_view_ = nullptr;
   QPlainTextEdit* output_view_ = nullptr;

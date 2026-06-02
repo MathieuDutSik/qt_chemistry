@@ -12,6 +12,7 @@
 #include "ui/HtmlDelegate.h"
 #include "ui/SolutionPanel.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -156,6 +157,17 @@ MainWindow::MainWindow(QWidget* parent)
     bar->addWidget(totals_unit_final_);
     bar->addWidget(totals_unit_lbl_delta_);
     bar->addWidget(totals_unit_delta_);
+    totals_metric_lbl_ = new QLabel(tr("Error:"));
+    totals_metric_ = new QComboBox;
+    totals_metric_->addItem(tr("max"));
+    totals_metric_->addItem(tr("min"));
+    totals_metric_->addItem(tr("mean L1"));
+    totals_metric_->addItem(tr("RMS L2"));
+    totals_metric_->setCurrentIndex(2);  // mean L1
+    connect(totals_metric_, &QComboBox::currentTextChanged, this,
+            [this](const QString&) { renderTotalsTab(); });
+    bar->addWidget(totals_metric_lbl_);
+    bar->addWidget(totals_metric_);
     bar->addStretch(1);
     totals_volume_source_ = new QLabel;
     totals_volume_source_->setStyleSheet("color: #555;");
@@ -379,33 +391,60 @@ void MainWindow::onEditDatabase() {
       tr("Saved %1").arg(QFileInfo(current_database_path_).fileName()));
 }
 
-void MainWindow::onRun() {
+void MainWindow::onRun(bool monte_carlo) {
   QStringList warnings;
   const auto problem = solution_panel_->buildProblem(&warnings);
-  const auto r = session_->solveEquilibrium(problem, db_info_.get());
-  input_view_->setPlainText(QString::fromStdString(r.raw_input));
-  output_view_->setPlainText(QString::fromStdString(r.raw_output));
-  if (!warnings.isEmpty()) {
-    input_view_->appendPlainText(QStringLiteral("\n# qt_chemistry notes:\n# ") +
-                                 warnings.join(QStringLiteral("\n# ")));
-  }
-  if (!r.ok) {
-    statusBar()->showMessage(tr("Run failed — see Raw output / status"));
-    output_view_->appendPlainText(QStringLiteral("\n---- ERROR ----\n") +
-                                  QString::fromStdString(r.error_string));
+
+  if (!monte_carlo) {
+    last_mc_result_ = MonteCarloResult{};
+    last_mc_active_ = false;
+    const auto r = session_->solveEquilibrium(problem, db_info_.get());
+    input_view_->setPlainText(QString::fromStdString(r.raw_input));
+    output_view_->setPlainText(QString::fromStdString(r.raw_output));
+    if (!warnings.isEmpty()) {
+      input_view_->appendPlainText(QStringLiteral("\n# qt_chemistry notes:\n# ") +
+                                   warnings.join(QStringLiteral("\n# ")));
+    }
+    if (!r.ok) {
+      statusBar()->showMessage(tr("Run failed — see Raw output / status"));
+      output_view_->appendPlainText(QStringLiteral("\n---- ERROR ----\n") +
+                                    QString::fromStdString(r.error_string));
+      return;
+    }
+    const auto po = parsePhreeqcOutput(r.raw_output);
+    renderResults(po);
+    const size_t nspec = po.frames.empty() ? 0 : po.frames.back().species.size();
+    statusBar()->showMessage(
+        tr("OK — %1 frame(s), %2 species, %3 SI, %4 equilibrium phases%5")
+            .arg(po.frames.size())
+            .arg(nspec)
+            .arg(po.saturation.size())
+            .arg(po.assemblage.size())
+            .arg(po.has_reaction_step
+                     ? tr("  (reaction step ran)") : QString()));
     return;
   }
-  const auto po = parsePhreeqcOutput(r.raw_output);
-  renderResults(po);
-  const size_t nspec = po.frames.empty() ? 0 : po.frames.back().species.size();
+
+  const auto spec = solution_panel_->buildUncertaintySpec();
+  const auto budget = solution_panel_->buildMonteCarloBudget();
+  statusBar()->showMessage(tr("Running Monte Carlo…"));
+  QApplication::processEvents();
+  auto mc = runMonteCarlo(problem, spec, budget, *session_, db_info_.get());
+  if (!mc.error.empty()) {
+    statusBar()->showMessage(tr("MC failed: %1")
+                                  .arg(QString::fromStdString(mc.error)));
+    return;
+  }
+  last_mc_result_ = std::move(mc);
+  last_mc_active_ = true;
+  // Show the baseline output in the raw panes so the existing view-flow stays
+  // useful; the MC stats drive the totals tab.
+  renderResults(last_mc_result_.baseline);
   statusBar()->showMessage(
-      tr("OK — %1 frame(s), %2 species, %3 SI, %4 equilibrium phases%5")
-          .arg(po.frames.size())
-          .arg(nspec)
-          .arg(po.saturation.size())
-          .arg(po.assemblage.size())
-          .arg(po.has_reaction_step
-                   ? tr("  (reaction step ran)") : QString()));
+      tr("OK — %1 MC runs in %2 s (baseline + %3 perturbed)")
+          .arg(last_mc_result_.runs_completed + 1)
+          .arg(QString::number(last_mc_result_.elapsed_seconds, 'f', 2))
+          .arg(last_mc_result_.runs_completed));
 }
 
 void MainWindow::renderTotalsTab() {
@@ -459,12 +498,30 @@ void MainWindow::renderTotalsTab() {
   const std::string u_final   = totals_unit_final_->currentText().toStdString();
   const std::string u_delta   = totals_unit_delta_->currentText().toStdString();
 
+  const bool show_mc = last_mc_active_ && !two_frames;
+  const QString metric =
+      show_mc ? totals_metric_->currentText() : QString();
+  totals_metric_lbl_->setVisible(show_mc);
+  totals_metric_->setVisible(show_mc);
+
+  std::map<std::string, const ElementAggregate*> mc_by_root;
+  if (show_mc) {
+    for (const auto& e : last_mc_result_.elements)
+      mc_by_root[e.element] = &e;
+  }
+
   if (two_frames) {
     setHeaders(totals_table_,
                {tr("Element"), tr("Master species"),
                 tr("Initial (%1)").arg(QString::fromStdString(u_initial)),
                 tr("Final (%1)").arg(QString::fromStdString(u_final)),
                 tr("Δ (%1)").arg(QString::fromStdString(u_delta))});
+  } else if (show_mc) {
+    setHeaders(totals_table_,
+               {tr("Element"), tr("Master species"),
+                tr("Total (%1)").arg(QString::fromStdString(u_initial)),
+                tr("%1 (%2)").arg(metric,
+                                  QString::fromStdString(u_initial))});
   } else {
     setHeaders(totals_table_,
                {tr("Element"), tr("Master species"),
@@ -477,6 +534,14 @@ void MainWindow::renderTotalsTab() {
     if (aw > 0.0) in.molar_mass_g_per_mol = aw;
     auto v = convertFromMolality(in, ctx, unit);
     return v ? sciItem(*v) : textItem(QStringLiteral("—"));
+  };
+  auto metric_value = [&](const ScalarAggregate& sa) -> double {
+    if (sa.n_samples == 0) return 0.0;
+    if (metric == tr("max"))     return sa.max_value - sa.baseline;
+    if (metric == tr("min"))     return sa.min_value - sa.baseline;
+    if (metric == tr("mean L1")) return sa.mean_l1;
+    if (metric == tr("RMS L2"))  return sa.rms_l2;
+    return sa.mean_l1;
   };
   for (size_t i = 0; i < ordered_roots.size(); ++i) {
     const std::string& root = ordered_roots[i];
@@ -507,6 +572,15 @@ void MainWindow::renderTotalsTab() {
       const double mol = fin ? fin->molality
                               : (init ? init->molality : 0.0);
       totals_table_->setItem(i, 2, cell(mol, aw, u_initial));
+      if (show_mc) {
+        auto it = mc_by_root.find(root);
+        if (it != mc_by_root.end() && it->second->molality.n_samples > 0) {
+          totals_table_->setItem(i, 3,
+              cell(metric_value(it->second->molality), aw, u_initial));
+        } else {
+          totals_table_->setItem(i, 3, textItem(QStringLiteral("—")));
+        }
+      }
     }
   }
 }

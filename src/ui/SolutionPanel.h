@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kernel/EquilibriumProblem.h"
+#include "kernel/MonteCarlo.h"
 
 #include <QStringList>
 #include <QWidget>
@@ -11,6 +12,7 @@ class QDoubleSpinBox;
 class QComboBox;
 class QLineEdit;
 class QLabel;
+class QGroupBox;
 
 namespace qtchem {
 
@@ -25,11 +27,15 @@ public:
   void setDatabaseInfo(std::shared_ptr<const DatabaseInfo> info);
 
   EquilibriumProblem buildProblem(QStringList* warnings = nullptr) const;
+  bool uncertaintyEnabled() const;
+  UncertaintySpec buildUncertaintySpec() const;
+  MonteCarloBudget buildMonteCarloBudget() const;
   void loadSampleSeawater();
   void loadEmpty();
 
 signals:
-  void runRequested();
+  // emitted when Run is clicked; mc==true iff the uncertainty box is checked
+  void runRequested(bool mc);
 
 private slots:
   void onAddRow();
@@ -51,6 +57,12 @@ private:
   QLineEdit* charge_el_ = nullptr;
   QLabel* db_hint_ = nullptr;
   QComboBox* activity_override_ = nullptr;
+
+  QGroupBox* mc_group_ = nullptr;
+  QDoubleSpinBox* mc_dt_ = nullptr;
+  QDoubleSpinBox* mc_dp_ = nullptr;
+  QDoubleSpinBox* mc_dph_ = nullptr;
+  QDoubleSpinBox* mc_runtime_ = nullptr;
 
   std::shared_ptr<const DatabaseInfo> db_info_;
 };
