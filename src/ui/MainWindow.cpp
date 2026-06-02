@@ -525,7 +525,7 @@ void MainWindow::renderTotalsTab() {
   const std::string u_final   = totals_unit_final_->currentText().toStdString();
   const std::string u_delta   = totals_unit_delta_->currentText().toStdString();
 
-  const bool show_mc = last_mc_active_ && !two_frames;
+  const bool show_mc = last_mc_active_;
   const QString metric =
       show_mc ? totals_metric_->currentText() : QString();
   totals_metric_lbl_->setVisible(show_mc);
@@ -537,7 +537,15 @@ void MainWindow::renderTotalsTab() {
       mc_by_root[e.element] = &e;
   }
 
-  if (two_frames) {
+  if (two_frames && show_mc) {
+    setHeaders(totals_table_,
+               {tr("Element"), tr("Master species"),
+                tr("Initial (%1)").arg(QString::fromStdString(u_initial)),
+                tr("Final (%1)").arg(QString::fromStdString(u_final)),
+                tr("%1 of Final (%2)").arg(metric,
+                                           QString::fromStdString(u_final)),
+                tr("Δ (%1)").arg(QString::fromStdString(u_delta))});
+  } else if (two_frames) {
     setHeaders(totals_table_,
                {tr("Element"), tr("Master species"),
                 tr("Initial (%1)").arg(QString::fromStdString(u_initial)),
@@ -592,9 +600,20 @@ void MainWindow::renderTotalsTab() {
       totals_table_->setItem(i, 3,
           fin ? cell(fin->molality, aw, u_final)
               : textItem(QStringLiteral("—")));
+      int delta_col = 4;
+      if (show_mc) {
+        auto it = mc_by_root.find(root);
+        if (it != mc_by_root.end() && it->second->molality.n_samples > 0) {
+          totals_table_->setItem(i, 4,
+              cell(metric_value(it->second->molality), aw, u_final));
+        } else {
+          totals_table_->setItem(i, 4, textItem(QStringLiteral("—")));
+        }
+        delta_col = 5;
+      }
       const double dm = (fin ? fin->molality : 0.0)
                       - (init ? init->molality : 0.0);
-      totals_table_->setItem(i, 4, cell(dm, aw, u_delta));
+      totals_table_->setItem(i, delta_col, cell(dm, aw, u_delta));
     } else {
       const double mol = fin ? fin->molality
                               : (init ? init->molality : 0.0);
