@@ -21,3 +21,9 @@ add_test(NAME solution_units_emit_test COMMAND solution_units_emit_test)
 add_executable(water_density_test water_density_test.cpp)
 target_link_libraries(water_density_test PRIVATE qtchem_kernel)
 add_test(NAME water_density_test COMMAND water_density_test)
+
+add_executable(monte_carlo_test monte_carlo_test.cpp)
+target_link_libraries(monte_carlo_test PRIVATE qtchem_kernel)
+target_compile_definitions(monte_carlo_test PRIVATE
+  QTCHEM_TEST_DATABASE_DIR="${QTCHEM_IPHREEQC_DATABASE_DIR}")
+add_test(NAME monte_carlo_test COMMAND monte_carlo_test)

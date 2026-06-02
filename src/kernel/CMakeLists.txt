@@ -14,7 +14,9 @@ add_library(qtchem_kernel STATIC
   UnitConvert.h
   UnitConvert.cpp
   WaterDensity.h
-  WaterDensity.cpp)
+  WaterDensity.cpp
+  MonteCarlo.h
+  MonteCarlo.cpp)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core)
 target_link_libraries(qtchem_kernel PUBLIC Qt6::Core)
