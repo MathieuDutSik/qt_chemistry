@@ -6,6 +6,7 @@
 #include <PhreeqcRM.h>
 
 #include <clocale>
+#include <cmath>
 #include <string>
 
 namespace qtchem {
@@ -109,6 +110,78 @@ SolveResult PhreeqcSession::runRawInput(const std::string& input) {
     r.ok = true;
   }
   return r;
+}
+
+std::vector<ElementTotalRow> PhreeqcSession::readTypedTotals(
+    const std::vector<std::string>& elements) const {
+  std::vector<ElementTotalRow> out;
+  out.reserve(elements.size());
+
+  const int n_rows = util_->GetSelectedOutputRowCount();
+  const int n_cols = util_->GetSelectedOutputColumnCount();
+  if (n_rows < 2 || n_cols <= 0) {
+    for (const auto& e : elements)
+      out.push_back({e, std::nan(""), std::nan("")});
+    return out;
+  }
+
+  // Row 0 is the header; the LAST data row is the post-reaction state.
+  std::vector<std::string> headers(n_cols);
+  for (int c = 0; c < n_cols; ++c) {
+    VAR v; VarInit(&v);
+    util_->GetSelectedOutputValue(0, c, &v);
+    if (v.type == TT_STRING && v.sVal) headers[c] = v.sVal;
+    VarClear(&v);
+  }
+  const int last_row = n_rows - 1;
+
+  // `-totals Na` emits a column named either literally "Na" or "Na(<unit>)"
+  // depending on the PHREEQC build; accept both.
+  auto column_for = [&](const std::string& element) -> int {
+    const std::string prefix = element + "(";
+    for (int c = 0; c < n_cols; ++c) {
+      if (headers[c] == element ||
+          headers[c].compare(0, prefix.size(), prefix) == 0)
+        return c;
+    }
+    return -1;
+  };
+
+  for (const auto& element : elements) {
+    ElementTotalRow row;
+    row.element = element;
+    const int c = column_for(element);
+    if (c >= 0) {
+      VAR v; VarInit(&v);
+      util_->GetSelectedOutputValue(last_row, c, &v);
+      double m = std::nan("");
+      if (v.type == TT_DOUBLE) m = v.dVal;
+      else if (v.type == TT_LONG) m = static_cast<double>(v.lVal);
+      VarClear(&v);
+      row.molality = m;
+      row.moles = m;  // selected-output -totals is mol/kgw; mass ≈ 1 kg
+    } else {
+      row.molality = std::nan("");
+      row.moles = std::nan("");
+    }
+    out.push_back(row);
+  }
+  return out;
+}
+
+void PhreeqcSession::refineParsedTotals(
+    ParsedOutput& po, const std::vector<std::string>& elements) const {
+  if (po.frames.empty()) return;
+  const auto typed = readTypedTotals(elements);
+  for (auto& t : po.frames.back().totals) {
+    for (const auto& tt : typed) {
+      if (tt.element == t.element && !std::isnan(tt.molality)) {
+        t.molality = tt.molality;
+        t.moles = tt.moles;
+        break;
+      }
+    }
+  }
 }
 
 SolveResult PhreeqcSession::solveEquilibrium(const EquilibriumProblem& p,

@@ -94,6 +94,11 @@ MonteCarloResult runMonteCarlo(const EquilibriumProblem& baseline_problem,
     res.error = "baseline output had no frames";
     return res;
   }
+  std::vector<std::string> element_names;
+  element_names.reserve(baseline_problem.components.size());
+  for (const auto& c : baseline_problem.components)
+    element_names.push_back(c.element);
+  session.refineParsedTotals(res.baseline, element_names);
   const auto& base_final = res.baseline.frames.back();
 
   // Build per-key aggregators keyed by element root and (element, species).
@@ -126,6 +131,7 @@ MonteCarloResult runMonteCarlo(const EquilibriumProblem& baseline_problem,
     if (!r.ok) continue;
     auto po = parsePhreeqcOutput(r.raw_output);
     if (po.frames.empty()) continue;
+    session.refineParsedTotals(po, element_names);
     const auto& f = po.frames.back();
     for (const auto& t : f.totals) {
       auto it = elem_agg.find(elementRoot(t.element));

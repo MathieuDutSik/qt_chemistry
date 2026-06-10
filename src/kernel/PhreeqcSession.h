@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kernel/PhreeqcOutputParser.h"
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -40,6 +42,23 @@ public:
                                const DatabaseInfo* db = nullptr);
 
   SolveResult runRawInput(const std::string& phreeqc_input);
+
+  // Full-precision element totals read directly from the selected-output
+  // VAR table (typed) instead of parsed from the PHREEQC text dump.
+  // Returns one row per element name in `elements`, in the same order; an
+  // element whose column is absent from selected output gets NaN molality.
+  // Must be called after a successful solve — reads state from the last
+  // RunString.
+  std::vector<ElementTotalRow> readTypedTotals(
+      const std::vector<std::string>& elements) const;
+
+  // Overwrite the molality / moles of matching entries in `po`'s last
+  // frame's totals with the typed values from the last solve. Element
+  // rows in the parsed output that have no typed counterpart (e.g. redox
+  // states the user did not request) are left untouched. No-op if `po`
+  // has no frames or the typed lookup fails.
+  void refineParsedTotals(ParsedOutput& po,
+                           const std::vector<std::string>& elements) const;
 
 private:
   std::unique_ptr<PhreeqcRM> impl_;

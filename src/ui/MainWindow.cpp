@@ -420,7 +420,12 @@ void MainWindow::onRun() {
           tr("Run failed: %1").arg(QString::fromStdString(r.error_string)));
       return;
     }
-    const auto po = parsePhreeqcOutput(r.raw_output);
+    auto po = parsePhreeqcOutput(r.raw_output);
+    std::vector<std::string> element_names;
+    element_names.reserve(problem.components.size());
+    for (const auto& c : problem.components)
+      element_names.push_back(c.element);
+    session_->refineParsedTotals(po, element_names);
     renderResults(po);
     const size_t nspec = po.frames.empty() ? 0 : po.frames.back().species.size();
     QString msg =

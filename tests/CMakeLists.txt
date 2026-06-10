@@ -27,3 +27,9 @@ target_link_libraries(monte_carlo_test PRIVATE qtchem_kernel)
 target_compile_definitions(monte_carlo_test PRIVATE
   QTCHEM_TEST_DATABASE_DIR="${QTCHEM_IPHREEQC_DATABASE_DIR}")
 add_test(NAME monte_carlo_test COMMAND monte_carlo_test)
+
+add_executable(typed_totals_parity_test typed_totals_parity_test.cpp)
+target_link_libraries(typed_totals_parity_test PRIVATE qtchem_kernel)
+target_compile_definitions(typed_totals_parity_test PRIVATE
+  QTCHEM_TEST_DATABASE_DIR="${QTCHEM_IPHREEQC_DATABASE_DIR}")
+add_test(NAME typed_totals_parity_test COMMAND typed_totals_parity_test)
