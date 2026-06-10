@@ -11,16 +11,21 @@ endif()
 
 option(QTCHEM_BUILD_TESTS "Build unit tests" ON)
 
-set(IPHREEQC_ENABLE_MODULE OFF CACHE BOOL "" FORCE)
-set(IPHREEQC_FORTRAN_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/iphreeqc EXCLUDE_FROM_ALL)
+
+set(PHREEQCRM_DISABLE_OPENMP  ON  CACHE BOOL "" FORCE)
+set(PHREEQCRM_BUILD_MPI       OFF CACHE BOOL "" FORCE)
+set(PHREEQCRM_BUILD_PYTHON    OFF CACHE BOOL "" FORCE)
+set(PHREEQCRM_FORTRAN_TESTING OFF CACHE BOOL "" FORCE)
+set(PHREEQCRM_WITH_YAML_CPP   OFF CACHE BOOL "" FORCE)
+set(PHREEQCRM_USE_ZLIB        OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/phreeqcrm EXCLUDE_FROM_ALL)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 qt_standard_project_setup()
 
 set(QTCHEM_IPHREEQC_DATABASE_DIR
-  "${CMAKE_CURRENT_SOURCE_DIR}/external/iphreeqc/database"
+  "${CMAKE_CURRENT_SOURCE_DIR}/external/phreeqcrm/database"
   CACHE PATH "Default directory containing PHREEQC .dat files")
 
 add_subdirectory(src)

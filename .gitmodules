@@ -1,4 +1,3 @@
-[submodule "external/iphreeqc"]
-	path = external/iphreeqc
-	url = https://github.com/usgs-coupled/iphreeqc.git
-	branch = master
+[submodule "external/phreeqcrm"]
+	path = external/phreeqcrm
+	url = https://github.com/phreeqc-dev/phreeqcrm.git

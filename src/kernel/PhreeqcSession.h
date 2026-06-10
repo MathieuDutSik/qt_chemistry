@@ -6,6 +6,7 @@
 #include <vector>
 
 class IPhreeqc;
+class PhreeqcRM;
 
 namespace qtchem {
 
@@ -41,7 +42,12 @@ public:
   SolveResult runRawInput(const std::string& phreeqc_input);
 
 private:
-  std::unique_ptr<IPhreeqc> impl_;
+  std::unique_ptr<PhreeqcRM> impl_;
+  // Non-owning pointer to the Utility IPhreeqc instance hosted by `impl_`.
+  // We run all keyword input on this instance — its behaviour is the same
+  // as a free-standing IPhreeqc but with PhreeqcRM managing the lifetime
+  // (and ensuring database state is replicated across all RM instances).
+  IPhreeqc* util_ = nullptr;
   bool database_loaded_ = false;
   // True if the in-memory species database has been mutated by a previous
   // activity-override run (SOLUTION_SPECIES overrides persist across calls

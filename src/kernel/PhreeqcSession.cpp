@@ -3,6 +3,7 @@
 #include "kernel/EquilibriumProblem.h"
 
 #include <IPhreeqc.hpp>
+#include <PhreeqcRM.h>
 
 #include <clocale>
 #include <string>
@@ -25,25 +26,35 @@ class CNumericLocaleGuard {
 };
 }
 
-PhreeqcSession::PhreeqcSession() : impl_(std::make_unique<IPhreeqc>()) {
-  impl_->SetOutputStringOn(true);
-  impl_->SetErrorStringOn(true);
-  impl_->SetSelectedOutputStringOn(true);
-  impl_->SetOutputFileOn(false);
-  impl_->SetErrorFileOn(false);
-  impl_->SetSelectedOutputFileOn(false);
-  impl_->SetLogFileOn(false);
-  impl_->SetDumpFileOn(false);
+PhreeqcSession::PhreeqcSession()
+    : impl_(std::make_unique<PhreeqcRM>(1, 1)) {
+  impl_->SetErrorHandlerMode(0);
+  impl_->SetScreenOn(false);
+  impl_->SetPrintChemistryOn(false, false, false);
+  // PhreeqcRM hosts (thread_count + 2) IPhreeqc instances internally:
+  // workers [0..n-1], InitialPhreeqc at n, Utility at n+1. We drive all
+  // keyword input through the Utility instance so it is independent of
+  // any in-flight per-cell chemistry state.
+  util_ = impl_->GetIPhreeqcPointer(impl_->GetThreadCount() + 1);
+  util_->SetOutputStringOn(true);
+  util_->SetErrorStringOn(true);
+  util_->SetSelectedOutputStringOn(true);
+  util_->SetOutputFileOn(false);
+  util_->SetErrorFileOn(false);
+  util_->SetSelectedOutputFileOn(false);
+  util_->SetLogFileOn(false);
+  util_->SetDumpFileOn(false);
 }
 
 PhreeqcSession::~PhreeqcSession() = default;
 
 bool PhreeqcSession::loadDatabase(const std::string& path, std::string* err) {
   CNumericLocaleGuard locale_guard;
-  const int errors = impl_->LoadDatabase(path.c_str());
-  if (errors != 0) {
+  // PhreeqcRM::LoadDatabase loads the database into every hosted IPhreeqc
+  // instance, including our Utility instance.
+  if (impl_->LoadDatabase(path) != IRM_OK) {
     database_loaded_ = false;
-    if (err) *err = impl_->GetErrorString();
+    if (err) *err = util_->GetErrorString();
     return false;
   }
   database_loaded_ = true;
@@ -87,14 +98,14 @@ SolveResult PhreeqcSession::runRawInput(const std::string& input) {
     return r;
   }
   CNumericLocaleGuard locale_guard;
-  const int errors = impl_->RunString(input.c_str());
-  r.raw_output = impl_->GetOutputString();
-  r.warning_string = impl_->GetWarningString();
+  const int errors = util_->RunString(input.c_str());
+  r.raw_output = util_->GetOutputString();
+  r.warning_string = util_->GetWarningString();
   if (errors != 0) {
-    r.error_string = impl_->GetErrorString();
+    r.error_string = util_->GetErrorString();
     r.ok = false;
   } else {
-    r.selected_output = readSelectedOutputAsStrings(*impl_);
+    r.selected_output = readSelectedOutputAsStrings(*util_);
     r.ok = true;
   }
   return r;
