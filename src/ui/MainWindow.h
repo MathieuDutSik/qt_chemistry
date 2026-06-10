@@ -8,7 +8,6 @@
 
 class QAction;
 class QComboBox;
-class QPlainTextEdit;
 class QLabel;
 class QPushButton;
 class QTabWidget;
@@ -71,8 +70,6 @@ private:
   QAction* mode_direct_action_ = nullptr;
   QAction* mode_mc_action_ = nullptr;
   QTableWidget* desc_table_ = nullptr;
-  QPlainTextEdit* input_view_ = nullptr;
-  QPlainTextEdit* output_view_ = nullptr;
   QString database_dir_;
   QString user_database_dir_;
 };

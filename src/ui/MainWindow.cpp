@@ -30,7 +30,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
-#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSplitter>
@@ -267,17 +266,6 @@ MainWindow::MainWindow(QWidget* parent)
       1, new ChemDelegate(ChemDelegate::Mode::Reaction, this));
   result_tabs_->addTab(assemblage_table_, tr("Phase assemblage"));
 
-  input_view_ = new QPlainTextEdit;
-  input_view_->setReadOnly(true);
-  input_view_->setLineWrapMode(QPlainTextEdit::NoWrap);
-  input_view_->setPlaceholderText(tr("PHREEQC input as sent"));
-  result_tabs_->addTab(input_view_, tr("Raw input"));
-
-  output_view_ = new QPlainTextEdit;
-  output_view_->setReadOnly(true);
-  output_view_->setLineWrapMode(QPlainTextEdit::NoWrap);
-  result_tabs_->addTab(output_view_, tr("Raw output"));
-
   split->addWidget(result_tabs_);
   split->setStretchFactor(0, 1);
   split->setStretchFactor(1, 2);
@@ -398,8 +386,8 @@ void MainWindow::onDatabaseChanged(int index) {
     edit_btn_->setEnabled(userWritable);
   } else {
     db_status_->setText(tr("load failed"));
-    output_view_->setPlainText(QString::fromStdString(err));
-    statusBar()->showMessage(tr("Database load failed"));
+    statusBar()->showMessage(
+        tr("Database load failed: %1").arg(QString::fromStdString(err)));
     info_btn_->setEnabled(false);
     duplicate_btn_->setEnabled(false);
     edit_btn_->setEnabled(false);
@@ -427,29 +415,25 @@ void MainWindow::onRun() {
     last_mc_result_ = MonteCarloResult{};
     last_mc_active_ = false;
     const auto r = session_->solveEquilibrium(problem, db_info_.get());
-    input_view_->setPlainText(QString::fromStdString(r.raw_input));
-    output_view_->setPlainText(QString::fromStdString(r.raw_output));
-    if (!warnings.isEmpty()) {
-      input_view_->appendPlainText(QStringLiteral("\n# qt_chemistry notes:\n# ") +
-                                   warnings.join(QStringLiteral("\n# ")));
-    }
     if (!r.ok) {
-      statusBar()->showMessage(tr("Run failed — see Raw output / status"));
-      output_view_->appendPlainText(QStringLiteral("\n---- ERROR ----\n") +
-                                    QString::fromStdString(r.error_string));
+      statusBar()->showMessage(
+          tr("Run failed: %1").arg(QString::fromStdString(r.error_string)));
       return;
     }
     const auto po = parsePhreeqcOutput(r.raw_output);
     renderResults(po);
     const size_t nspec = po.frames.empty() ? 0 : po.frames.back().species.size();
-    statusBar()->showMessage(
+    QString msg =
         tr("OK — %1 frame(s), %2 species, %3 SI, %4 equilibrium phases%5")
             .arg(po.frames.size())
             .arg(nspec)
             .arg(po.saturation.size())
             .arg(po.assemblage.size())
             .arg(po.has_reaction_step
-                     ? tr("  (reaction step ran)") : QString()));
+                     ? tr("  (reaction step ran)") : QString());
+    if (!warnings.isEmpty())
+      msg += tr("  (notes: %1)").arg(warnings.join(QStringLiteral("; ")));
+    statusBar()->showMessage(msg);
     return;
   }
 
